@@ -91,8 +91,9 @@ def fetch_espn(league):
         for c in n.get("children", []):
             walk(c)
 
-    walk(get(f"https://site.api.espn.com/apis/v2/sports/{ESPN[league]}"
-             f"/standings?season={TODAY.year}&level=3", 25))
+        walk(get(f"https://site.web.api.espn.com/apis/v2/sports/{ESPN[league]}"
+             f"/standings?region=us&lang=en&contentorigin=espn"
+             f"&season={TODAY.year}&type=0&level=1", 25))
 
     def board(day):
         u = (f"https://site.api.espn.com/apis/site/v2/sports/{ESPN[league]}"
