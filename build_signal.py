@@ -121,4 +121,19 @@ def nba_standings(league, season):
             gp = int(w) + int(l)
             pf = _stat(e, "pointsFor", "avgPointsFor")
             pa = _stat(e, "pointsAgainst", "avgPointsAgainst")
-            if pf is not None and gp and
+            # ESPN sometimes gives per-game averages instead of totals
+            if pf is not None and gp and 200 > float(pf):
+                pf = float(pf) * gp
+            if pa is not None and gp and 200 > float(pa):
+                pa = float(pa) * gp
+            st = _stat(e, "streak")
+            if isinstance(st, (int, float)):
+                st = ("W" if st > 0 else "L") + str(abs(int(st)))
+            recs[name] = {"w": int(w), "l": int(l), "gp": gp,
+                          "streak": st or "-",
+                          "pf": float(pf or 0), "pa": float(pa or 0)}
+        for child in node.get("children", []):
+            walk(child)
+
+    walk(d)
+    return recs
