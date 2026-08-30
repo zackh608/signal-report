@@ -14,10 +14,10 @@ STAMP = datetime.datetime.now().astimezone().isoformat(timespec="seconds")
 
 
 def get(url, timeout=30):
-    r = urllib.request.Request(url, headers={"User-Agent": "signal"})
-    with urllib.request.urlopen(r, timeout=timeout) as f:
-        return json.loads(f.read().decode())
-
+    r = urllib.request.Request(url, headers={
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+                      " (KHTML, like Gecko) Chrome/122.0 Safari/537.36",
+        "Accept": "application/json"})
 
 def sep(n):
     return "|" + (" --- |" * n)
