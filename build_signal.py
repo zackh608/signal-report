@@ -18,6 +18,8 @@ def get(url, timeout=30):
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
                       " (KHTML, like Gecko) Chrome/122.0 Safari/537.36",
         "Accept": "application/json"})
+    with urllib.request.urlopen(r, timeout=timeout) as f:
+        return json.loads(f.read().decode())
 
 def sep(n):
     return "|" + (" --- |" * n)
