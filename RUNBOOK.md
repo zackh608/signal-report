@@ -19,7 +19,8 @@ If a run fails or is skipped, the next run backfills automatically — nothing t
 ```powershell
 cd path\to\signal-report
 python nba_tracker.py --no-gist                 # pull missing days, rebuild rates, write report locally
-python nba_tracker.py --from 2026-10-20 --no-gist   # force a full re-pull from a date
+python nba_tracker.py --from 2026-10-20 --no-gist   # pull from a date (already-stored games are kept)
+python nba_tracker.py --rebuild --no-gist            # throw away stored logs and re-pull everything (after a parser fix)
 python nba_tracker.py --rates-only --no-gist    # offline: recompute rates from stored logs only
 ```
 

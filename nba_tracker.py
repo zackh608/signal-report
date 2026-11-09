@@ -164,7 +164,10 @@ def parse_game(event_id, day):
     sides = {}
     for c in comp["competitors"]:
         t = c["team"]
-        lines = [num(x.get("value")) for x in c.get("linescores", [])]
+        # ESPN gives each period as {"value": 28} on the scoreboard but {"displayValue": "28"} on the
+        # summary endpoint; take whichever is present or every quarter silently becomes 0.
+        lines = [num(x.get("value") if x.get("value") not in (None, "") else x.get("displayValue"))
+                 for x in c.get("linescores", [])]
         sides[c["homeAway"]] = {
             "abbr": t.get("abbreviation"), "name": t.get("displayName"),
             "pts": num(c.get("score")), "q": (lines + [0, 0, 0, 0])[:4],
@@ -707,12 +710,18 @@ def main():
     ap.add_argument("--from", dest="start", default=None)
     ap.add_argument("--to", dest="end", default=None)
     ap.add_argument("--rates-only", action="store_true")
+    ap.add_argument("--rebuild", action="store_true", help="discard stored game logs and re-pull every date")
     ap.add_argument("--no-gist", action="store_true")
     a = ap.parse_args()
     yesterday = datetime.date.today() - datetime.timedelta(days=1)
     start = datetime.date.fromisoformat(a.start) if a.start else SEASON_START
     end = datetime.date.fromisoformat(a.end) if a.end else yesterday
 
+    if a.rebuild:
+        for f in (TEAM_LOG, PLAYER_LOG, os.path.join(DATA, "ingested_days.json")):
+            if os.path.exists(f):
+                os.remove(f)
+        print("rebuild: cleared stored game logs; re-pulling from", start)
     if a.rates_only:
         team_log, player_log = load(TEAM_LOG, {}), load(PLAYER_LOG, {})
     else:
