@@ -4,6 +4,14 @@ on:
   schedule:
     - cron: "0 13 * * *"
   workflow_dispatch:
+    inputs:
+      nba_from:
+        description: "NBA backfill start (YYYY-MM-DD). Blank = season start / only missing days"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -15,8 +23,28 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Build and push report
+      - name: Build and push team report (MLB / NBA / WNBA)
         env:
           GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
           GIST_ID: a7ebd591bd69d8a1bd777a60ab7ce089
         run: python build_signal.py
+
+      - name: NBA tracker - team + player game logs and O/U hit rates
+        env:
+          GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
+          GIST_ID: a7ebd591bd69d8a1bd777a60ab7ce089
+        run: |
+          if [ -n "${{ github.event.inputs.nba_from }}" ]; then
+            python nba_tracker.py --from "${{ github.event.inputs.nba_from }}"
+          else
+            python nba_tracker.py
+          fi
+
+      - name: Commit NBA data back to repo (keeps backfill state)
+        run: |
+          git config user.name "signal-bot"
+          git config user.email "signal-bot@users.noreply.github.com"
+          git add data/nba nba_player_props.md
+          git diff --cached --quiet && echo "no data changes" && exit 0
+          git commit -m "nba: data through $(date -u +%F)"
+          git push
