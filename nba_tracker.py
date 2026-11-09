@@ -12,7 +12,8 @@ Run modes
 Lines
   Drop a CSV at data/nba/lines/YYYY-MM-DD.csv with columns  player,market,line[,book]
   and that day's props are graded against the real posted line. With no CSV, SIGNAL grades
-  against a synthetic line = trailing-10 median rounded to .5 and labels it "signal-median".
+  against a synthetic line = median of the last 20 eligible games rounded to .5 and labels it
+  "signal-median" (a season baseline, so L5/L10 rates against it show a real recent trend).
 """
 import os, sys, json, csv, datetime, statistics, urllib.request, urllib.error, time, argparse
 
@@ -368,8 +369,15 @@ def load_lines():
     return out
 
 
-def half_round(x):
-    return round(x * 2) / 2 if x % 1 else x + 0.5   # 20.0 -> 20.5, 20.3 -> 20.5
+def half_round(x, mean=None):
+    """Snap a median to a .5 line. A whole-number median can go either way, so pick the side the
+    mean sits on (23.0 with mean 23.8 -> 23.5; with mean 22.4 -> 22.5). Low-count markets (steals,
+    blocks) are where this matters most; the old +0.5 default made every UNDER look like a lock."""
+    if x % 1:
+        return round(x * 2) / 2
+    if mean is not None and mean < x:
+        return x - 0.5
+    return x + 0.5
 
 
 # ---------------------------------------------------------------- rates
@@ -422,7 +430,10 @@ def compute(team_log, player_log):
             if lk:
                 line, src = lk[0], f"{lk[1]} ({lk[2]})"
             else:
-                line, src = half_round(statistics.median(vals[:10])), "signal-median"
+                # baseline = median of the last 20 eligible games (season-ish), so an L5/L10 rate against it
+                # measures a real recent trend. An L10 median would split L10 ~50/50 by construction.
+                base = vals[:20]
+                line, src = half_round(statistics.median(base), statistics.fmean(base)), "signal-median"
             blk = rate_block(vals, line)
             blk.update({"line": line, "line_source": src,
                         "cushion": round((blk["median_l10"] or 0) - line, 1)})
@@ -557,7 +568,7 @@ def team_profile(abbr, rows):
         vals = [fn(r) for r in rows]
         if not any(vals) and mk.startswith("TEAM_"):
             continue  # box stat missing from source
-        line = half_round(statistics.median(vals[:10]))
+        line = half_round(statistics.median(vals[:20]), statistics.fmean(vals[:20]))  # L20 baseline
         blk = rate_block(vals, line)
         blk.update({"line": line, "line_source": "signal-median",
                     "cushion": round((blk["median_l10"] or 0) - line, 1),
@@ -575,8 +586,9 @@ def pct(o, n):
 def report(players, teams, days):
     P = ["# SIGNAL NBA Tracker", "", f"Generated: `{STAMP}` | games through `{days[-1] if days else '-'}` "
          f"| {len(teams)} teams | {len(players)} players with 3+ eligible games", "",
-         f"Hit rates use games with {MIN_MINUTES}+ minutes. Line source `signal-median` = trailing-10 "
-         "median (no posted line captured); book lines come from data/nba/lines/*.csv.", ""]
+         f"Hit rates use games with {MIN_MINUTES}+ minutes. Line source `signal-median` = median of the last 20 "
+         "eligible games (the player's season baseline; no posted line captured); book lines come from "
+         "data/nba/lines/*.csv.", ""]
     wl = lambda r: f"{r['w']}-{r['l']}" if r and r["gp"] else "-"
     P += ["## Team Board", "",
           "| Team | W-L | Home | Away | L10 | PPG | Opp | Net | Pace | ORtg | DRtg | 1Q | 1H | 2H | Led@half W-L | Trailed@half W-L |",
@@ -645,8 +657,8 @@ def report(players, teams, days):
             if n >= 8:
                 o = b["over_l10"]
                 # synthetic lines sit on the median, so demand a real gap between avg and line
-                if b["line_source"] == "signal-median" and abs((b["avg_l10"] or 0) - b["line"]) < 1:
-                    continue
+                if b["line_source"] == "signal-median" and (abs((b["avg_l10"] or 0) - b["line"]) < 1 or b["line"] < 5):
+                    continue  # synthetic lines: need a real gap, and no low-count markets (STL/BLK/S+B/low 3PM)
                 if o / n >= .8 or o / n <= .2:
                     side = "OVER" if o / n >= .8 else "UNDER"
                     trends.append((abs(b["cushion"]), side, p, mk, b))

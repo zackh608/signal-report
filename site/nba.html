@@ -87,7 +87,7 @@ tr:hover td{background:rgba(27,36,46,.5)}
 <div class="wrap">
 <section id="tab-players">
   <h2>Player props — hit rates vs line</h2>
-  <p class="lede">Every player with 3+ games of 15+ minutes. <b>Line</b> is the posted book line when SIGNAL captured one (<span class="pill book">book</span>), otherwise the trailing-10 median rounded to .5 (<span class="pill">signal-median</span>) — a median line sits in the middle on purpose, so look for the <b>cushion</b> (median − line) and the L20 agreement before trusting an L10 rate. <span class="pill trap">HOT/COLD-STREAK-PRICED</span> means the recent window has run away from the longer sample — that's where the book has usually already moved.</p>
+  <p class="lede">Every player with 3+ games of 15+ minutes. <b>Line</b> is the posted book line when SIGNAL captured one (<span class="pill book">book</span>), otherwise the player's <b>season baseline</b>: the median of his last 20 eligible games, rounded to .5 (<span class="pill">signal-median</span>). An L5 or L10 rate against that baseline is a real recent trend; the <b>cushion</b> is how far his L10 median sits from it. <span class="pill trap">HOT/COLD-STREAK-PRICED</span> means the recent window has run away from the longer sample — that's where the book has usually already moved.</p>
   <div class="panel">
     <div class="controls">
       <input id="p-search" placeholder="Search player or team…" style="min-width:220px">
@@ -116,7 +116,7 @@ tr:hover td{background:rgba(27,36,46,.5)}
 
 <section id="tab-card" style="display:none">
   <h2>Paper card — strongest legs on the board</h2>
-  <p class="lede">The same filter Jarvis's props-desk uses: 8+ eligible games, 80%+ one side in L10, 70%+ in L20, cushion ≥ 1, 24+ minutes L5, no streak-priced flag. Ranked by 0.5·L10 + 0.3·L20 + 0.2·relative cushion. Paper only — this is a read on the data, not a recommendation to bet. Legs are shown for every team; check who actually plays tonight.</p>
+  <p class="lede">The same filter Jarvis's props-desk uses: 8+ eligible games, 80%+ one side in L10, 70%+ in L20, cushion ≥ 1, 24+ minutes L5, no streak-priced flag, and low-count markets (steals, blocks, lines under 5) only when a real book line is posted. Ranked by 0.5·L10 + 0.3·L20 + 0.2·relative cushion. Paper only — this is a read on the data, not a recommendation to bet. Legs are shown for every team; check who actually plays tonight.</p>
   <div class="cards" id="card-legs"></div>
 </section>
 
@@ -225,6 +225,7 @@ function renderCard(){
   (HR.players||[]).forEach(function(p){ if((p.min_l5||0)<24) return;
     MARKETS.forEach(function(m){var b=p.markets[m]; if(!b||(b.n_l10||0)<8||b.trap_flag) return;
       var r10=b.over_l10/b.n_l10, r20=b.n_l20?b.over_l20/b.n_l20:r10, c=b.cushion||0, side=null;
+      if(b.line_source==='signal-median'&&b.line<5) return; /* low-count markets need a posted line */
       if(r10>=.8&&r20>=.7&&c>=1) side='over'; else if((1-r10)>=.8&&(1-r20)>=.7&&-c>=1) side='under'; if(!side) return;
       var d10=side==='over'?r10:1-r10, d20=side==='over'?r20:1-r20, rel=Math.min(Math.abs(c)/Math.max(b.line,1),.25);
       legs.push({p:p,m:m,b:b,side:side,d10:d10,d20:d20,score:.5*d10+.3*d20+.2*rel/.25});});});

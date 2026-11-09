@@ -42,7 +42,7 @@ Onyeka Okongwu,REB,8.5,FD
 ```
 
 Commit it. Those player/markets are then graded against the posted line and labelled with the book;
-everything else stays on the `signal-median` line (trailing-10 median rounded to .5).
+everything else stays on the `signal-median` line (median of the last 20 eligible games, rounded to .5 — the player's season baseline).
 
 ## 5. What lives where
 

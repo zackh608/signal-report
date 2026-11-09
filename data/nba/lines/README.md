@@ -1,7 +1,7 @@
 # Posted lines (optional)
 
 Drop one CSV per day here, named `YYYY-MM-DD.csv`, and `nba_tracker.py` grades that
-player/market against the real posted line instead of the SIGNAL trailing-10 median.
+player/market against the real posted line instead of the SIGNAL baseline (median of the last 20 eligible games).
 
 ```
 player,market,line,book
