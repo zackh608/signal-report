@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SIGNAL — NBA Tracker</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Teko:wght@500;600;700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0A0E13;--bg-alt:#0D1218;--panel:#141B23;--panel-2:#1B242E;--line:#26313D;
+  --text:#EAF1F7;--text-dim:#8CA0B3;--text-faint:#5A6B7B;
+  --amber:#FF8A3D;--amber-dim:#7A4A26;--cool:#4C8DFF;--cool-dim:#28406E;
+  --turf:#34C77B;--turf-dim:#1C5A3B;--loss:#FF5C6C;--loss-dim:#6B2530;--gold:#F5C451;
+  --radius:10px;--font-display:'Teko',sans-serif;--font-body:'Inter',sans-serif;--font-mono:'IBM Plex Mono',monospace;
+}
+*{box-sizing:border-box}html,body{margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:var(--font-body);-webkit-font-smoothing:antialiased;
+  background-image:radial-gradient(circle at 15% 0%,rgba(255,138,61,.06),transparent 40%),radial-gradient(circle at 85% 10%,rgba(76,141,255,.05),transparent 45%)}
+a{color:inherit}
+.wrap{max-width:1380px;margin:0 auto;padding:0 20px 80px}
+.topbar{position:sticky;top:0;z-index:40;background:rgba(10,14,19,.92);backdrop-filter:blur(10px);border-bottom:1px solid var(--line)}
+.topbar-inner{max-width:1380px;margin:0 auto;padding:14px 20px;display:flex;align-items:center;justify-content:space-between;gap:16px;flex-wrap:wrap}
+.brand-mark{font-family:var(--font-display);font-size:34px;font-weight:700;letter-spacing:.5px;line-height:1}
+.brand-mark span{color:var(--amber)}
+.brand-sub{font-size:12px;color:var(--text-dim);line-height:1.3}
+.topbar-right{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.btn{font-family:var(--font-body);font-weight:600;font-size:13px;background:var(--panel-2);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:9px 16px;cursor:pointer;white-space:nowrap;text-decoration:none}
+.btn:hover{border-color:var(--text-dim)}.btn-primary{background:var(--amber);color:#1a0d05;border-color:var(--amber)}
+.stamp{font-family:var(--font-mono);font-size:11px;color:var(--text-dim);text-align:right}
+.stamp b{color:var(--turf);font-weight:500}.stamp b.stale{color:var(--gold)}.stamp b.bad{color:var(--loss)}
+.tabbar{border-bottom:1px solid var(--line);background:var(--bg-alt)}
+.tabbar-inner{max-width:1380px;margin:0 auto;padding:0 20px;display:flex;gap:4px;overflow-x:auto}
+.tab{font-family:var(--font-display);font-size:20px;font-weight:600;letter-spacing:.5px;color:var(--text-dim);background:none;border:none;border-bottom:3px solid transparent;padding:12px 18px 8px;cursor:pointer}
+.tab.active{color:var(--text);border-bottom-color:var(--amber)}
+h2{font-family:var(--font-display);font-size:28px;font-weight:600;letter-spacing:.5px;margin:26px 0 6px}
+.lede{color:var(--text-dim);font-size:13px;margin:0 0 16px;max-width:900px;line-height:1.5}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:16px;margin-bottom:18px}
+.controls{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
+.controls input,.controls select{font-family:var(--font-body);font-size:13px;background:var(--panel-2);color:var(--text);border:1px solid var(--line);border-radius:8px;padding:8px 12px}
+.controls label{font-size:12px;color:var(--text-dim);display:flex;align-items:center;gap:6px}
+.tablewrap{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:13px}
+th{font-family:var(--font-mono);font-size:11px;font-weight:500;text-transform:uppercase;letter-spacing:.4px;color:var(--text-dim);text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);white-space:nowrap;cursor:pointer;user-select:none}
+th.sorted{color:var(--amber)}th .arr{opacity:.6;font-size:9px;margin-left:3px}
+td{padding:8px 10px;border-bottom:1px solid rgba(38,49,61,.6);white-space:nowrap;font-variant-numeric:tabular-nums}
+tr:hover td{background:rgba(27,36,46,.5)}
+.mono{font-family:var(--font-mono);font-size:12px}
+.over{color:var(--turf);font-weight:600}.under{color:var(--loss);font-weight:600}.neutral{color:var(--text-dim)}
+.pill{display:inline-block;font-family:var(--font-mono);font-size:10.5px;padding:2px 7px;border-radius:999px;border:1px solid var(--line);color:var(--text-dim)}
+.pill.book{border-color:var(--cool-dim);color:var(--cool)}.pill.trap{border-color:var(--amber-dim);color:var(--amber)}
+.rate{display:inline-block;min-width:54px}
+.bar{display:inline-block;height:6px;border-radius:3px;background:var(--panel-2);width:40px;vertical-align:middle;margin-left:6px;position:relative;overflow:hidden}
+.bar i{position:absolute;left:0;top:0;bottom:0;background:var(--turf)}.bar.u i{background:var(--loss)}
+.cards{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px}
+.card{background:var(--panel-2);border:1px solid var(--line);border-radius:var(--radius);padding:14px}
+.card .who{font-family:var(--font-display);font-size:24px;font-weight:600;line-height:1;margin-bottom:2px}
+.card .what{font-size:15px;margin:6px 0 10px}.card .what b{font-size:17px}
+.card .meta{font-family:var(--font-mono);font-size:11px;color:var(--text-dim);line-height:1.7}
+.team-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(420px,1fr));gap:14px}
+.team{background:var(--panel-2);border:1px solid var(--line);border-radius:var(--radius);padding:14px}
+.team h3{font-family:var(--font-display);font-size:26px;font-weight:600;margin:0 0 4px;display:flex;justify-content:space-between;align-items:baseline}
+.team h3 small{font-family:var(--font-mono);font-size:12px;color:var(--text-dim);font-weight:400}
+.team table{font-size:12px}.team td,.team th{padding:5px 7px}
+.recs{font-family:var(--font-mono);font-size:11px;color:var(--text-dim);line-height:1.8;margin:6px 0 8px}
+.recs b{color:var(--text);font-weight:500}
+.empty{color:var(--text-dim);padding:30px;text-align:center}
+.foot{font-size:11px;color:var(--text-faint);margin-top:30px;line-height:1.6}
+@media(max-width:700px){.team-grid{grid-template-columns:1fr}.tab{font-size:17px;padding:10px 12px 6px}}
+</style>
+</head>
+<body>
+<div class="topbar"><div class="topbar-inner">
+  <div><div class="brand-mark">SIGNAL<span>.</span></div><div class="brand-sub">NBA tracker — every team, every player,<br>every over/under hit rate</div></div>
+  <div class="topbar-right">
+    <div class="stamp" id="stamp">Loading…</div>
+    <a class="btn" href="index.html">← Team board</a>
+    <button class="btn" id="btn-refresh">Refresh now</button>
+  </div>
+</div></div>
+<div class="tabbar"><div class="tabbar-inner">
+  <button class="tab active" data-tab="players">PLAYERS</button>
+  <button class="tab" data-tab="teams">TEAMS</button>
+  <button class="tab" data-tab="card">PAPER CARD</button>
+</div></div>
+
+<div class="wrap">
+<section id="tab-players">
+  <h2>Player props — hit rates vs line</h2>
+  <p class="lede">Every player with 3+ games of 15+ minutes. <b>Line</b> is the posted book line when SIGNAL captured one (<span class="pill book">book</span>), otherwise the trailing-10 median rounded to .5 (<span class="pill">signal-median</span>) — a median line sits in the middle on purpose, so look for the <b>cushion</b> (median − line) and the L20 agreement before trusting an L10 rate. <span class="pill trap">HOT/COLD-STREAK-PRICED</span> means the recent window has run away from the longer sample — that's where the book has usually already moved.</p>
+  <div class="panel">
+    <div class="controls">
+      <input id="p-search" placeholder="Search player or team…" style="min-width:220px">
+      <select id="p-market"></select>
+      <label><input type="checkbox" id="p-strong"> 80%+ one side in L10 only</label>
+      <label><input type="checkbox" id="p-book"> book lines only</label>
+      <label>min minutes L5 <input type="number" id="p-min" value="15" style="width:64px"></label>
+      <span id="p-count" class="mono neutral"></span>
+    </div>
+    <div class="tablewrap"><table id="p-table"><thead></thead><tbody></tbody></table></div>
+  </div>
+</section>
+
+<section id="tab-teams" style="display:none">
+  <h2>Team profiles — quarters, halves, situations</h2>
+  <p class="lede">Scoring by segment for the season, last 5 and last 10, home and away; records by situation (won 1Q, led at half, close games…), four factors, and the segment lines SIGNAL grades against.</p>
+  <div class="panel">
+    <div class="controls">
+      <input id="t-search" placeholder="Filter team…" style="min-width:200px">
+      <select id="t-sort"><option value="win">Sort: win %</option><option value="net">Sort: net rating</option><option value="pace">Sort: pace</option><option value="total">Sort: game total line</option><option value="h1">Sort: 1H margin</option><option value="h2">Sort: 2H margin</option></select>
+    </div>
+    <div class="tablewrap"><table id="t-board"><thead></thead><tbody></tbody></table></div>
+  </div>
+  <div class="team-grid" id="t-cards"></div>
+</section>
+
+<section id="tab-card" style="display:none">
+  <h2>Paper card — strongest legs on the board</h2>
+  <p class="lede">The same filter Jarvis's props-desk uses: 8+ eligible games, 80%+ one side in L10, 70%+ in L20, cushion ≥ 1, 24+ minutes L5, no streak-priced flag. Ranked by 0.5·L10 + 0.3·L20 + 0.2·relative cushion. Paper only — this is a read on the data, not a recommendation to bet. Legs are shown for every team; check who actually plays tonight.</p>
+  <div class="cards" id="card-legs"></div>
+</section>
+
+<div class="foot">Data: SIGNAL nba_tracker (ESPN public box scores, NBA.com fallback) → github.com/zackh608/signal-report. Hit rates count games with 15+ minutes. Nothing here is odds, a probability, or advice.</div>
+</div>
+
+<script>
+var BASE = 'https://raw.githubusercontent.com/zackh608/signal-report/main/data/nba/';
+var MARKETS = ['PTS','REB','AST','3PM','PRA','PR','PA','RA','STL','BLK','S+B'];
+var HR = null, TS = null, sortKey = 'score', sortDir = -1;
+
+function pct(o, n){ return n ? Math.round(100*o/n) : null; }
+function fmtRate(o, n, side){
+  if (!n) return '<span class="neutral">–</span>';
+  var p = side==='under' ? n-o : o, r = Math.round(100*p/n);
+  var cls = r>=80 ? (side==='under'?'under':'over') : 'neutral';
+  return '<span class="rate '+cls+'">'+p+'/'+n+' <span class="mono">('+r+'%)</span></span><span class="bar'+(side==='under'?' u':'')+'"><i style="width:'+r+'%"></i></span>';
+}
+function sideOf(b){ var n=b.n_l10||0; if(!n) return 'none'; var r=b.over_l10/n; return r>=.8?'over':(r<=.2?'under':'none'); }
+
+async function load(){
+  var st = document.getElementById('stamp');
+  try{
+    var bust='?_='+Date.now();
+    var [hr, ts] = await Promise.all([fetch(BASE+'nba_hit_rates.json'+bust,{cache:'no-store'}).then(r=>{if(!r.ok)throw new Error('hit_rates '+r.status);return r.json();}),
+                                      fetch(BASE+'nba_team_stats.json'+bust,{cache:'no-store'}).then(r=>{if(!r.ok)throw new Error('team_stats '+r.status);return r.json();})]);
+    HR=hr; TS=ts;
+    var gen = new Date(hr.generated), age = (Date.now()-gen)/36e5;
+    st.innerHTML = 'games through <b>'+(hr.through||'?')+'</b><br>generated '+gen.toLocaleString()+' · <b class="'+(age>36?'stale':'')+'">'+(age>36?'STALE ':'')+Math.round(age)+'h ago</b>';
+    renderPlayers(); renderTeams(); renderCard();
+  }catch(e){
+    st.innerHTML='<b class="bad">no data</b> — '+e.message+'<br>run the tracker / check the repo';
+    document.getElementById('p-table').querySelector('tbody').innerHTML='<tr><td colspan="12" class="empty">No tracker data yet. Once <span class="mono">data/nba/nba_hit_rates.json</span> exists in the repo this page fills itself.</td></tr>';
+  }
+}
+
+/* ---------------- players ---------------- */
+function playerRows(){
+  var q=document.getElementById('p-search').value.toLowerCase(), mk=document.getElementById('p-market').value,
+      strong=document.getElementById('p-strong').checked, bookOnly=document.getElementById('p-book').checked,
+      minMin=parseFloat(document.getElementById('p-min').value)||0, rows=[];
+  (HR.players||[]).forEach(function(p){
+    if ((p.min_l5||0)<minMin) return;
+    if (q && !(p.player.toLowerCase().includes(q)||p.team.toLowerCase().includes(q))) return;
+    var b=p.markets[mk]; if(!b) return;
+    if (bookOnly && b.line_source==='signal-median') return;
+    var side=sideOf(b); if (strong && side==='none') return;
+    var n10=b.n_l10||0, n20=b.n_l20||0, r10=n10?b.over_l10/n10:0, r20=n20?b.over_l20/n20:r10;
+    var dirRate10 = side==='under'?1-r10:r10, dirRate20 = side==='under'?1-r20:r20;
+    rows.push({p:p,b:b,side:side,r10:dirRate10,r20:dirRate20,
+      score: side==='none'?0:(0.5*dirRate10+0.3*dirRate20+0.2*Math.min(Math.abs(b.cushion||0)/Math.max(b.line,1),.25)/.25)});
+  });
+  return rows;
+}
+var PCOLS=[['player','Player',r=>r.p.player],['team','Team',r=>r.p.team],['min','Min L5',r=>r.p.min_l5],['line','Line',r=>r.b.line],
+  ['side','Side',r=>r.side],['l5','L5',r=>r.b.n_l5?(r.side==='under'?r.b.n_l5-r.b.over_l5:r.b.over_l5)/r.b.n_l5:-1],['l10','L10',r=>r.r10],['l20','L20',r=>r.r20],
+  ['season','Season',r=>r.b.n_season?r.b.over_season/r.b.n_season:-1],['streak','Streak',r=>r.b.streak||''],['avg','Avg L10',r=>r.b.avg_l10],['cushion','Cushion',r=>r.b.cushion],['score','Score',r=>r.score],['src','Line src',r=>r.b.line_source]];
+function renderPlayers(){
+  var rows=playerRows(), key=PCOLS.find(c=>c[0]===sortKey)||PCOLS[12];
+  rows.sort((a,b)=>{var x=key[2](a),y=key[2](b); if(typeof x==='string') return sortDir*x.localeCompare(y); return sortDir*((x??-1e9)-(y??-1e9));});
+  document.getElementById('p-count').textContent=rows.length+' rows';
+  document.querySelector('#p-table thead').innerHTML='<tr>'+PCOLS.map(c=>'<th data-k="'+c[0]+'" class="'+(c[0]===sortKey?'sorted':'')+'">'+c[1]+(c[0]===sortKey?'<span class="arr">'+(sortDir<0?'▼':'▲')+'</span>':'')+'</th>').join('')+'</tr>';
+  document.querySelectorAll('#p-table th').forEach(th=>th.onclick=()=>{var k=th.dataset.k; if(sortKey===k) sortDir*=-1; else {sortKey=k; sortDir=(k==='player'||k==='team'||k==='src'||k==='streak')?1:-1;} renderPlayers();});
+  var mk=document.getElementById('p-market').value;
+  document.querySelector('#p-table tbody').innerHTML = rows.length? rows.map(r=>{var b=r.b, s=r.side;
+    return '<tr><td><b>'+r.p.player+'</b></td><td class="mono">'+r.p.team+'</td><td class="mono">'+r.p.min_l5+'</td><td class="mono"><b>'+b.line+'</b> '+mk+'</td>'+
+    '<td>'+(s==='none'?'<span class="neutral">split</span>':'<span class="'+s+'">'+s.toUpperCase()+'</span>')+'</td>'+
+    '<td>'+fmtRate(b.over_l5||0,b.n_l5||0,s==='none'?'over':s)+'</td><td>'+fmtRate(b.over_l10,b.n_l10,s==='none'?'over':s)+'</td><td>'+fmtRate(b.over_l20||0,b.n_l20||0,s==='none'?'over':s)+'</td>'+
+    '<td>'+fmtRate(b.over_season||0,b.n_season||0,s==='none'?'over':s)+'</td><td class="mono">'+(b.streak||'–')+'</td><td class="mono">'+b.avg_l10+'</td>'+
+    '<td class="mono '+((b.cushion||0)>0?'over':(b.cushion||0)<0?'under':'')+'">'+((b.cushion||0)>0?'+':'')+b.cushion+'</td><td class="mono">'+(r.score?r.score.toFixed(3):'–')+'</td>'+
+    '<td><span class="pill '+(b.line_source==='signal-median'?'':'book')+'">'+b.line_source+'</span>'+(b.trap_flag?' <span class="pill trap">'+b.trap_flag+'</span>':'')+'</td></tr>';}).join('')
+    : '<tr><td colspan="14" class="empty">Nothing matches these filters.</td></tr>';
+}
+
+/* ---------------- teams ---------------- */
+function wl(r){ return r&&r.gp? r.w+'-'+r.l : '–'; }
+function seg(s){ return s&&s.pts!=null ? s.pts+'-'+s.opp+' <span class="neutral">('+s.total+')</span>' : '–'; }
+function mk(t,k){ var m=t.markets[k]; return m? '<b>'+m.line+'</b> <span class="neutral">O '+(m.n_l10?Math.round(100*m.over_l10/m.n_l10):'–')+'%</span>' : '–'; }
+function renderTeams(){
+  var q=document.getElementById('t-search').value.toLowerCase(), how=document.getElementById('t-sort').value;
+  var teams=(TS.teams||[]).filter(t=>!q||t.team.toLowerCase().includes(q)||t.team_name.toLowerCase().includes(q));
+  var keyf={win:t=>t.gp?t.w/t.gp:0, net:t=>(t.four_factors.offense.rating||0)-(t.four_factors.defense.rating||0), pace:t=>t.four_factors.offense.pace||0,
+            total:t=>t.markets.GAME_TOTAL?t.markets.GAME_TOTAL.line:0, h1:t=>t.scoring.season['1H'].margin||0, h2:t=>t.scoring.season['2H'].margin||0}[how];
+  teams.sort((a,b)=>keyf(b)-keyf(a));
+  document.querySelector('#t-board thead').innerHTML='<tr><th>Team</th><th>W-L</th><th>Home</th><th>Away</th><th>L10</th><th>PPG-Opp</th><th>Net</th><th>Pace</th><th>ORtg</th><th>DRtg</th><th>1Q</th><th>1H</th><th>2H</th><th>Led@half</th><th>Trailed@half</th><th>Total line · O%</th><th>1H total</th><th>1Q total</th></tr>';
+  document.querySelector('#t-board tbody').innerHTML=teams.map(t=>{var S=t.scoring.season,R=t.records,ff=t.four_factors,net=(ff.offense.rating||0)-(ff.defense.rating||0);
+    return '<tr><td><b>'+t.team+'</b> <span class="neutral">'+t.team_name+'</span></td><td class="mono">'+t.w+'-'+t.l+'</td><td class="mono">'+wl(R.home)+'</td><td class="mono">'+wl(R.away)+'</td><td class="mono">'+wl(R.last10)+'</td>'+
+    '<td class="mono">'+S.FULL.pts+'-'+S.FULL.opp+'</td><td class="mono '+(net>0?'over':'under')+'">'+(net>0?'+':'')+net.toFixed(1)+'</td><td class="mono">'+(ff.offense.pace||'–')+'</td><td class="mono">'+(ff.offense.rating||'–')+'</td><td class="mono">'+(ff.defense.rating||'–')+'</td>'+
+    '<td class="mono">'+S['1Q'].pts+'-'+S['1Q'].opp+'</td><td class="mono">'+S['1H'].pts+'-'+S['1H'].opp+'</td><td class="mono">'+S['2H'].pts+'-'+S['2H'].opp+'</td><td class="mono">'+wl(R.led_at_half)+'</td><td class="mono">'+wl(R.trailed_at_half)+'</td>'+
+    '<td class="mono">'+mk(t,'GAME_TOTAL')+'</td><td class="mono">'+mk(t,'1H_TOTAL')+'</td><td class="mono">'+mk(t,'1Q_TOTAL')+'</td></tr>';}).join('');
+  document.getElementById('t-cards').innerHTML=teams.map(t=>{var Sc=t.scoring,R=t.records,ff=t.four_factors,cb=t.comebacks,qw=t.quarters_won;
+    var segs=['1Q','2Q','3Q','4Q','1H','2H','FULL'].map(k=>'<tr><td><b>'+k+'</b></td><td class="mono">'+seg(Sc.season[k])+'</td><td class="mono">'+seg(Sc.last5[k])+'</td><td class="mono">'+seg(Sc.last10[k])+'</td><td class="mono">'+(Sc.home[k].pts!=null?Sc.home[k].pts+'-'+Sc.home[k].opp:'–')+'</td><td class="mono">'+(Sc.away[k].pts!=null?Sc.away[k].pts+'-'+Sc.away[k].opp:'–')+'</td><td class="mono">'+(Sc.season[k].won_pct??'–')+'%</td></tr>').join('');
+    var o=ff.offense,d=ff.defense;
+    return '<div class="team"><h3>'+t.team_name+' <small>'+t.w+'-'+t.l+' · last '+t.last_game+'</small></h3>'+
+    '<div class="recs">Home <b>'+wl(R.home)+'</b> · Away <b>'+wl(R.away)+'</b> · L5 <b>'+wl(R.last5)+'</b> · vs .500+ <b>'+wl(R.vs_winning_teams)+'</b> · Close ≤5 <b>'+wl(R.close_games_5)+'</b> · 15+ <b>'+wl(R.blowouts_15)+'</b> · OT <b>'+wl(R.overtime)+'</b><br>'+
+    'Won 1Q → <b>'+wl(R.won_1q)+'</b> · Lost 1Q → <b>'+wl(R.lost_1q)+'</b> · Led half → <b>'+wl(R.led_at_half)+'</b> · Trailed half → <b>'+wl(R.trailed_at_half)+'</b> · Won 3Q → <b>'+wl(R.won_3q)+'</b> · Won 4Q → <b>'+wl(R.won_4q)+'</b><br>'+
+    'Comebacks: <b>'+cb.wins_after_trailing_half+'</b> W after trailing at half · <b>'+cb.losses_after_leading_half+'</b> L after leading at half · <b>'+cb.wins_after_trailing_3q+'</b> W after trailing thru 3 · quarters won 1Q <b>'+qw.q1+'</b> 2Q <b>'+qw.q2+'</b> 3Q <b>'+qw.q3+'</b> 4Q <b>'+qw.q4+'</b>/'+t.gp+'</div>'+
+    '<div class="tablewrap"><table><thead><tr><th>Seg</th><th>Season (tot)</th><th>L5</th><th>L10</th><th>Home</th><th>Away</th><th>Won</th></tr></thead><tbody>'+segs+'</tbody></table></div>'+
+    (o.efg_pct!=null?'<div class="recs" style="margin-top:8px">eFG <b>'+o.efg_pct+'</b>/'+d.efg_pct+' · TOV% <b>'+o.tov_pct+'</b>/'+d.tov_pct+' · OREB% <b>'+o.oreb_pct+'</b>/'+d.oreb_pct+' · FT rate <b>'+o.ft_rate+'</b>/'+d.ft_rate+' · 3PA rate <b>'+o.fg3a_rate+'</b>/'+d.fg3a_rate+' · 3P% <b>'+o.fg3_pct+'</b>/'+d.fg3_pct+' · ORtg <b>'+o.rating+'</b> · DRtg <b>'+d.rating+'</b> · pace <b>'+o.pace+'</b> <span class="neutral">(offense/opp)</span></div>':'')+
+    '<div class="recs">Lines: total '+mk(t,'GAME_TOTAL')+' · team '+mk(t,'TEAM_PTS')+' · 1H '+mk(t,'1H_TOTAL')+' · 2H '+mk(t,'2H_TOTAL')+' · 1Q '+mk(t,'1Q_TOTAL')+' · margin '+mk(t,'MARGIN')+' · 1H margin '+mk(t,'1H_MARGIN')+'</div></div>';}).join('');
+}
+
+/* ---------------- paper card ---------------- */
+function renderCard(){
+  var legs=[];
+  (HR.players||[]).forEach(function(p){ if((p.min_l5||0)<24) return;
+    MARKETS.forEach(function(m){var b=p.markets[m]; if(!b||(b.n_l10||0)<8||b.trap_flag) return;
+      var r10=b.over_l10/b.n_l10, r20=b.n_l20?b.over_l20/b.n_l20:r10, c=b.cushion||0, side=null;
+      if(r10>=.8&&r20>=.7&&c>=1) side='over'; else if((1-r10)>=.8&&(1-r20)>=.7&&-c>=1) side='under'; if(!side) return;
+      var d10=side==='over'?r10:1-r10, d20=side==='over'?r20:1-r20, rel=Math.min(Math.abs(c)/Math.max(b.line,1),.25);
+      legs.push({p:p,m:m,b:b,side:side,d10:d10,d20:d20,score:.5*d10+.3*d20+.2*rel/.25});});});
+  legs.sort((a,b)=>b.score-a.score);
+  var el=document.getElementById('card-legs');
+  el.innerHTML = legs.length? legs.slice(0,30).map((l,i)=>'<div class="card"><div class="who">'+l.p.player+' <span class="neutral" style="font-size:14px">'+l.p.team+'</span></div>'+
+    '<div class="what"><span class="'+l.side+'">'+l.side.toUpperCase()+'</span> <b>'+l.b.line+'</b> '+l.m+' <span class="pill '+(l.b.line_source==='signal-median'?'':'book')+'">'+l.b.line_source+'</span></div>'+
+    '<div class="meta">L5 '+(l.side==='over'?l.b.over_l5:l.b.n_l5-l.b.over_l5)+'/'+l.b.n_l5+' · L10 '+Math.round(l.d10*l.b.n_l10)+'/'+l.b.n_l10+' · L20 '+(l.b.n_l20?Math.round(l.d20*l.b.n_l20)+'/'+l.b.n_l20:'–')+'<br>streak '+(l.b.streak||'–')+' · avg L10 '+l.b.avg_l10+' · cushion '+((l.b.cushion>0?'+':'')+l.b.cushion)+' · min L5 '+l.p.min_l5+'<br>score '+l.score.toFixed(3)+' · rank #'+(i+1)+'</div></div>').join('')
+    : '<div class="empty">No leg clears the thresholds right now — that is a valid answer.</div>';
+}
+
+/* ---------------- wiring ---------------- */
+document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x===t));['players','teams','card'].forEach(k=>document.getElementById('tab-'+k).style.display=t.dataset.tab===k?'':'none');});
+document.getElementById('p-market').innerHTML=MARKETS.map(m=>'<option>'+m+'</option>').join('');
+['p-search','p-market','p-strong','p-book','p-min'].forEach(id=>document.getElementById(id).addEventListener('input',()=>HR&&renderPlayers()));
+['t-search','t-sort'].forEach(id=>document.getElementById(id).addEventListener('input',()=>TS&&renderTeams()));
+document.getElementById('btn-refresh').onclick=load;
+load(); setInterval(load, 5*60*1000);
+</script>
+</body>
+</html>
