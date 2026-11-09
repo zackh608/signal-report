@@ -47,4 +47,6 @@ jobs:
           git add data/nba nba_player_props.md
           git diff --cached --quiet && echo "no data changes" && exit 0
           git commit -m "nba: data through $(date -u +%F)"
+          # the Desktop scheduled task may have pushed the same day's data; replay on top, keep our files
+          git pull --rebase -X theirs origin main || true
           git push
