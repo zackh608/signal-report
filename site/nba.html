@@ -88,7 +88,7 @@ tr:hover td{background:rgba(27,36,46,.5)}
 <div class="wrap">
 <section id="tab-today">
   <h2>Today's slate — only players and teams on the floor tonight</h2>
-  <p class="lede">Pulled live from ESPN's scoreboard for today (ET). Games priced outside 25–75% pregame are flagged <span class="pill trap">BLOWOUT RISK</span>: role-player minutes and second-half totals in those games are unreliable. Players with no game today are hidden here; injuries and rest are <b>not</b> in this data — check the injury report before trusting any row. <b>Grade</b> = the chance a pick hits, from the player's own numbers, his minutes and how tonight's opponent defends that stat; a <b>*</b> means it was graded against SIGNAL's baseline because no book line is on file.</p>
+  <p class="lede">Pulled live from ESPN's scoreboard for today (ET). Games priced outside 25–75% pregame are flagged <span class="pill trap">BLOWOUT RISK</span>: role-player minutes and second-half totals in those games are unreliable. Players with no game today are hidden here; players listed out are removed and their teammates' projections are raised by the measured amount; still confirm late scratches yourself. <b>Grade</b> = the chance a pick hits, from the player's own numbers, his minutes and how tonight's opponent defends that stat; a <b>*</b> means it was graded against SIGNAL's baseline because no book line is on file.</p>
   <div class="panel">
     <div id="today-games" class="recs" style="margin-bottom:10px">loading today's games…</div>
     <div id="acc-panel" class="recs" style="margin-bottom:10px"></div>
@@ -156,7 +156,7 @@ tr:hover td{background:rgba(27,36,46,.5)}
 <script>
 var BASE = 'https://raw.githubusercontent.com/zackh608/signal-report/main/data/nba/';
 var MARKETS = ['PTS','REB','AST','3PM','PRA','PR','PA','RA','STL','BLK','S+B','TOV','FGM','FGA','3PA','FTM','FTA','OREB','DREB','PF'];
-var HR = null, TS = null, PROJ = null, ACC = null, GR = null, GRIDX = {}, sortKey = 'score', sortDir = -1;
+var HR = null, TS = null, PROJ = null, ACC = null, GR = null, REFS = null, GRIDX = {}, REFIDX = {}, sortKey = 'score', sortDir = -1;
 var TODAY = {date:null, games:[], teams:{}, lopsided:{}, error:null};
 var ESPN = 'https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard?dates=';
 
@@ -197,7 +197,8 @@ async function load(){
                                       fetch(BASE+'nba_team_stats.json'+bust,{cache:'no-store'}).then(r=>{if(!r.ok)throw new Error('team_stats '+r.status);return r.json();})]);
     HR=hr; TS=ts;
     var opt=u=>fetch(BASE+u+bust,{cache:'no-store'}).then(r=>r.ok?r.json():null).catch(()=>null);
-    [PROJ, ACC, GR] = await Promise.all([opt('projections.json'), opt('accuracy.json'), opt('grades.json')]);
+    [PROJ, ACC, GR, REFS] = await Promise.all([opt('projections.json'), opt('accuracy.json'), opt('grades.json'), opt('refs.json')]);
+    REFIDX={}; ((REFS&&REFS.officials)||[]).forEach(o=>REFIDX[o.official]=o);
     GRIDX={}; ((GR&&GR.players)||[]).forEach(p=>GRIDX[p.player+'|'+p.team]=p); fillGrader();
     var gen = new Date(hr.generated), age = (Date.now()-gen)/36e5;
     st.innerHTML = 'games through <b>'+(hr.through||'?')+'</b><br>generated '+gen.toLocaleString()+' · <b class="'+(age>36?'stale':'')+'">'+(age>36?'STALE ':'')+Math.round(age)+'h ago</b>';
@@ -242,7 +243,7 @@ function renderPlayers(x){
   document.querySelectorAll(T+' th').forEach(th=>th.onclick=()=>{var k=th.dataset.k; if(sortKey===k) sortDir*=-1; else {sortKey=k; sortDir=(k==='player'||k==='team'||k==='src'||k==='streak')?1:-1;} renderPlayers(x);});
   var mk=document.getElementById(x+'-market').value;
   document.querySelector(T+' tbody').innerHTML = rows.length? rows.map(r=>{var b=r.b, s=r.side, g=TODAY.teams[r.p.team], opp=g?(g.home.abbr===r.p.team?'vs '+g.away.abbr:'@ '+g.home.abbr):'';
-    return '<tr><td><b>'+r.p.player+'</b>'+(x==='d'&&TODAY.lopsided[r.p.team]?' <span class="pill trap">BLOWOUT RISK</span>':'')+'</td><td class="mono">'+r.p.team+(x==='d'?' <span class="neutral">'+opp+'</span>':'')+'</td><td class="mono">'+r.p.min_l5+'</td><td class="mono"><b>'+b.line+'</b> '+mk+'</td>'+
+    return '<tr><td><b>'+r.p.player+'</b>'+(x==='d'&&TODAY.lopsided[r.p.team]?' <span class="pill trap">BLOWOUT RISK</span>':'')+(x==='d'?tagsFor(r.p):'')+'</td><td class="mono">'+r.p.team+(x==='d'?' <span class="neutral">'+opp+'</span>':'')+'</td><td class="mono">'+r.p.min_l5+'</td><td class="mono"><b>'+b.line+'</b> '+mk+'</td>'+
     '<td>'+(s==='none'?'<span class="neutral">split</span>':'<span class="'+s+'">'+s.toUpperCase()+'</span>')+'</td>'+
     '<td>'+fmtRate(b.over_l5||0,b.n_l5||0,s==='none'?'over':s)+'</td><td>'+fmtRate(b.over_l10,b.n_l10,s==='none'?'over':s)+'</td><td>'+fmtRate(b.over_l20||0,b.n_l20||0,s==='none'?'over':s)+'</td>'+
     '<td>'+fmtRate(b.over_season||0,b.n_season||0,s==='none'?'over':s)+'</td><td class="mono">'+(b.streak||'–')+'</td><td class="mono">'+gradeCell(r.p,mk)+'</td><td class="mono"><b>'+(b.proj??'–')+'</b>'+(b.proj_sd!=null?' <span class="neutral">±'+b.proj_sd+'</span>':'')+(b.proj_edge!=null?' <span class="'+(b.proj_edge>0?'over':'under')+'">('+(b.proj_edge>0?'+':'')+b.proj_edge+' vs book)</span>':'')+'</td><td class="mono">'+b.avg_l10+'</td>'+
@@ -255,6 +256,23 @@ function renderPlayers(x){
 /* ---------------- grading ---------------- */
 function ncdf(x){ var t=1/(1+0.3275911*Math.abs(x)/Math.SQRT2), y=1-(((((1.061405429*t-1.453152027)*t)+1.421413741)*t-0.284496736)*t+0.254829592)*t*Math.exp(-x*x/2); return x>=0?(1+y)/2:(1-y)/2; }
 function gcls(g){ return g[0]==='A'?'over':(g==='B'?'':(g==='F'||g==='D'?'under':'neutral')); }
+function tagsFor(p){ var e=GRIDX[p.player+'|'+p.team]; if(!e) return '';
+  var L={teammate_out:'TEAMMATE OUT ↑',new_starter:'NEW STARTER ↑',to_bench:'TO BENCH ↓',b2b:'B2B',three_in_four:'3 IN 4',big_fav:'HEAVY FAV',big_dog:'HEAVY DOG'};
+  return (e.status?' <span class="pill trap">'+e.status.status.toUpperCase()+'</span>':'')+e.flags.map(f=>' <span class="pill'+(f==='teammate_out'||f==='new_starter'?' book':'')+'">'+(L[f]||f)+'</span>').join(''); }
+function cardContext(g,P){
+  if(!GR) return '';
+  var out=function(ab){ var o=(GR.out||[]).filter(x=>x.team===ab); return o.length? '<b>'+ab+' out:</b> '+o.map(x=>x.player+' <span class="neutral">('+x.min_season+' min'+(x.detail?', '+x.detail:'')+')</span>').join(', ') : ''; };
+  var sch=function(ab,c){ if(!c) return ''; var t=[]; if(c.b2b) t.push('back-to-back'); if(c.three_in_four) t.push('3rd game in 4 nights'); else if(c.four_in_six) t.push('4th in 6 nights');
+    if(c.road_trip>=2) t.push('game '+(c.road_trip+1)+' of a road trip'); if(Math.abs(c.tz_shift)>=2) t.push(Math.abs(c.tz_shift)+' time zones '+(c.tz_shift>0?'east':'west')); if(c.rest>=3) t.push(c.rest-1+' days off');
+    return t.length? '<b>'+ab+':</b> '+t.join(', ') : ''; };
+  var inj=[out(g.away.abbr),out(g.home.abbr)].filter(Boolean).join(' · ');
+  var rest=P?[sch(g.away.abbr,P.away_sched),sch(g.home.abbr,P.home_sched)].filter(Boolean).join(' · '):'';
+  var mv=''; if(P&&P.open&&P.book){ var a=[]; if(P.open.total!=null&&P.book.total!=null&&P.open.total!==P.book.total) a.push('total '+P.open.total+' → <b>'+P.book.total+'</b>');
+    if(P.open.home_spread!=null&&P.book.home_spread!=null&&P.open.home_spread!==P.book.home_spread) a.push('spread '+P.open.home_spread+' → <b>'+P.book.home_spread+'</b>'); mv=a.length?'<b>Line moved:</b> '+a.join(', '):''; }
+  var refs=''; if(P&&P.officials&&P.officials.length){ refs='<b>Crew:</b> '+P.officials.map(function(n){var r=REFIDX[n]; return n+(r&&r.games>=3?' <span class="neutral">('+r.games+' g, fouls '+(r.fouls_vs_lg>0?'+':'')+r.fouls_vs_lg+', pts '+(r.pts_vs_lg>0?'+':'')+r.pts_vs_lg+' vs league)</span>':'');}).join(', '); }
+  var lines=[GR.injuries_known?(inj||'<span class="neutral">No rotation players listed out.</span>'):'<span class="under">Injury report not loaded for this run.</span>',rest,mv,refs].filter(Boolean);
+  return '<div class="recs">'+lines.join('<br>')+'</div>';
+}
 function gradeOf(p,mk){ var e=GRIDX[p.player+'|'+p.team]; return e&&e.markets[mk]||null; }
 function gradeCell(p,mk){ var g=gradeOf(p,mk); if(!g) return '<span class="neutral">–</span>';
   return '<b class="'+gcls(g.grade)+'" title="'+g.notes.join('; ').replace(/"/g,'')+'">'+g.grade+(g.book?'':'*')+'</b> <span class="neutral">'+g.side[0].toUpperCase()+' '+Math.round(100*g.p)+'%</span>'; }
@@ -286,7 +304,12 @@ function runGrader(){
   det.innerHTML='<b>'+e.player+'</b> ('+e.team+(e.home?' vs ':' @ ')+e.opp+') — season average <b>'+m.base+'</b> '+mk+' over '+e.n+' games, typical swing ±'+m.sd+'. '+
     (m.fx.length? 'Matchup: '+m.fx.map(f=>e.opp+' ranks #'+f[1]+' in '+f[0].toLowerCase()+' allowed ('+(f[2]>0?'+':'')+f[2]+'%)').join('; ')+' → adjusted projection <b>'+m.adj+'</b>. '
                : 'No matchup signal for this stat has tested as real yet, so the projection stays at his average. ')+
-    'Minutes L5 '+e.min_l5+(e.lopsided?' · <span class="pill trap">BLOWOUT RISK</span>':'')+'. '+
+    (m.cx&&m.cx.length? 'Tonight: '+m.cx.map(c=>c[0]+' ('+(c[1]>0?'+':'')+c[1]+'%)').join('; ')+'. ' : '')+
+    (e.status? '<span class="under">Listed '+e.status.status+(e.status.detail?' — '+e.status.detail:'')+'.</span> ' : '')+
+    'Minutes: season '+e.min_season+', last 5 '+e.min_l5+' ('+(e.min_trend>0?'+':'')+e.min_trend+' trend), started '+e.starts_l5+' of last 5'+(e.lopsided?' · <span class="pill trap">BLOWOUT RISK</span>':'')+'. '+
+    ((e.splits||[]).length? '<br>With/without: '+e.splits.slice(0,2).map(sp=>'without '+sp.teammate+' ('+sp.n_without+' g) <b>'+sp.pts_without+'</b> pts / '+sp.reb_without+' reb / '+sp.ast_without+' ast in '+sp.min_without+' min — with him ('+sp.n_with+' g) '+sp.pts_with+' / '+sp.reb_with+' / '+sp.ast_with+' in '+sp.min_with).join('; ')+'. <span class="neutral">(small samples: shown, not applied)</span> ' : '')+
+    (e.blowout? '<br>Game script: in '+e.blowout.n+' games decided by 15+ he played '+e.blowout.min+' min for '+e.blowout.pts+' pts, vs '+e.blowout.min_close+' min / '+e.blowout.pts_close+' pts otherwise. ' : '')+
+    (e.pos_def? '<br>'+e.opp+' vs his position ('+e.pos+'): allows '+e.pos_def.pts+' pts (#'+e.pos_def.pts_rank+'), '+e.pos_def.reb+' reb (#'+e.pos_def.reb_rank+'), '+e.pos_def.ast+' ast (#'+e.pos_def.ast_rank+'), '+e.pos_def.fg3m+' threes (#'+e.pos_def.fg3m_rank+') per game to that position. <span class="neutral">(tracked, not yet weighted)</span> ' : '')+'<br>'+
     (g.notes.length?'<span class="under">'+g.notes.join('; ')+'.</span> ':'')+
     '<span class="neutral">Grade = chance the pick hits: A+ 70%+, A 65%, B 60%, C 55%, D 52%, F below. '+(isNaN(parseFloat(li.value))?'Using SIGNAL\'s baseline line — type the book\'s number for the real grade.':'')+'</span>';
 }
@@ -344,7 +367,7 @@ function renderMatchups(){
       var a10=segTot(A,k,'last10'), h10=segTot(H,k,'last10'), as=segTot(A,k,'season'), hs=segTot(H,k,'season');
       return '<tr><td><b>'+k+'</b></td><td class="mono">'+(as?as.pts+'-'+as.opp:'–')+'</td><td class="mono">'+(a10?a10.pts+'-'+a10.opp:'–')+'</td><td class="mono">'+(hs?hs.pts+'-'+hs.opp:'–')+'</td><td class="mono">'+(h10?h10.pts+'-'+h10.opp:'–')+'</td></tr>';}).join('');
     var bkrec=function(t){var b=t.book||{}, o=b.GAME_TOTAL, c=b.COVER; return (o?'O/U vs book <b>'+o.over_season+'-'+(o.n_season-o.over_season-o.push_season)+'</b>':'')+(c?' · ATS <b>'+c.cover_season+'-'+(c.n_season-c.cover_season-c.push_season)+'</b> (avg '+sgn(c.avg_margin)+')':'');};
-    return '<div class="team"><h3>'+g.away.name+' <small>'+g.away.record+'</small> @ '+g.home.name+' <small>'+g.home.record+'</small>'+(g.lopsided?' <span class="pill trap">BLOWOUT RISK</span>':'')+'</h3>'+model+
+    return '<div class="team"><h3>'+g.away.name+' <small>'+g.away.record+'</small> @ '+g.home.name+' <small>'+g.home.record+'</small>'+(g.lopsided?' <span class="pill trap">BLOWOUT RISK</span>':'')+'</h3>'+model+cardContext(g,P)+
       '<div class="recs">'+g.away.abbr+' L10 <b>'+wl(A.records.last10)+'</b> · away <b>'+wl(A.records.away)+'</b> · pace '+(A.four_factors.offense.pace||'–')+(bkrec(A)?' · '+bkrec(A):'')+' &nbsp;|&nbsp; '+g.home.abbr+' L10 <b>'+wl(H.records.last10)+'</b> · home <b>'+wl(H.records.home)+'</b> · pace '+(H.four_factors.offense.pace||'–')+(bkrec(H)?' · '+bkrec(H):'')+'</div>'+
       '<div class="tablewrap"><table><thead><tr><th>Seg</th><th>'+g.away.abbr+' season (for-against)</th><th>'+g.away.abbr+' L10</th><th>'+g.home.abbr+' season</th><th>'+g.home.abbr+' L10</th></tr></thead><tbody>'+rows+'</tbody></table></div>'+edgeBlock(g,g.away.abbr,g.home.abbr)+edgeBlock(g,g.home.abbr,g.away.abbr)+'</div>';}).join('') || '';
 }

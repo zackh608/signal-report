@@ -32,6 +32,7 @@ jobs:
       - name: NBA tracker - team + player game logs and O/U hit rates
         env:
           GIST_TOKEN: ${{ secrets.GIST_TOKEN }}
+          ODDS_API_KEY: ${{ secrets.ODDS_API_KEY }}   # optional; unset = player prop lines are simply not fetched
           GIST_ID: a7ebd591bd69d8a1bd777a60ab7ce089
         run: |
           if [ -n "${{ github.event.inputs.nba_from }}" ]; then

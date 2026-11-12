@@ -101,6 +101,25 @@ the last-5 average was the worst predictor. `proj_edge` appears only when a real
 
 Nothing here knows about injuries. A player who is out still gets a grade.
 
+## 4e. Context tracking (since 2026-11-12) - all free, all from ESPN
+
+| Tracked | Where | Used in grades? |
+| --- | --- | --- |
+| **Injuries** (ESPN league report, every run) | `injuries.json`; `grades.json` -> `out` | Players listed Out are removed. Day-to-day / questionable = one grade down. |
+| **Teammate out** (a top-3 minutes teammate ruled out) | `accuracy.json` -> `context_effects.teammate_out` | Yes - half of the measured lift (scoring about +18%, rebounds +14%, assists +13% measured). |
+| **Role change** (new starter / moved to bench, from his last game) | player `role`, `starts_l5` | New starter yes (+26% scoring measured); to-bench not yet (too few cases). |
+| **Minutes trend** (last 3 vs season) | player `min_trend`, `min_l3` | No - tested, no effect on scoring. Displayed. |
+| **Rest and travel** (back-to-back, 3 in 4, 4 in 6, road-trip game number, time zones) | `projections.json` -> `home_sched` / `away_sched` | Team model: back-to-back -1.5, 3-in-4 -1.5. Time zones and road trips are tracked only (noise so far). |
+| **Game script** (minutes and points in 15+ point games; team 4th quarters in blowouts) | player `blowout`, team `blowout_script` | Heavy favourite / heavy underdog effects, measured from pregame odds of a blowout. |
+| **With/without splits** vs each top-5 teammate | player `splits` | No - samples are tiny. Shown in the grader when that teammate is out. |
+| **Defense by position** (what a team allows to guards / forwards / centers) | team `allowed_by_position` | Not yet - needs positions, which are stored from now on (REBUILD back-fills them). |
+| **Referee crews** | `refs.json`; tonight's crew on each matchup card when ESPN has posted it | No - display only. |
+| **Line movement** | `lines/history-<date>.csv`; `projections.json` -> `open` | Display only. |
+| **Player prop lines** | `lines/<date>.csv` | Yes, automatically, whenever a file exists. Type them by hand (section 4b), or set an `ODDS_API_KEY` (The Odds API free tier, 500 credits/month, no card): the tracker then pulls points/rebounds/assists lines once a day and stops itself before the free allowance runs out. With no key nothing is called. |
+
+Every effect above is re-measured on every run (`accuracy.json` -> `context_effects`), needs 40+ cases before it is
+used, is applied at half strength, and all of them together can never move a projection more than 20%.
+
 ## 5. What lives where
 
 | File | What |

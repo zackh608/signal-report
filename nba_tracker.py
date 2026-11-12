@@ -274,6 +274,11 @@ def parse_game(event_id, day):
     team_rows = [team_row(event_id, day, sides, ha, opp)
                  for ha, opp in (("home", "away"), ("away", "home"))]
     attach_odds(team_rows, parse_odds(g))
+    refs = [o.get("displayName") or o.get("fullName") for o in (g.get("gameInfo") or {}).get("officials") or []]
+    refs = [x for x in refs if x]
+    if refs:
+        for r in team_rows:
+            r["officials"] = refs
 
     player_rows = []
     for tb in g.get("boxscore", {}).get("players", []):
@@ -296,6 +301,7 @@ def parse_game(event_id, day):
                     "stl": num(v("STL")), "blk": num(v("BLK")), "tov": num(v("TO")),
                     "oreb": num(v("OREB")), "dreb": num(v("DREB")), "pf": num(v("PF")),
                     "fga": att(v("FG")), "fg3a": att(v("3PT")), "fta": att(v("FT")),
+                    "pos": ((a.get("athlete") or {}).get("position") or {}).get("abbreviation") or "",
                 }
                 if "+/-" in idx:
                     try:
@@ -356,6 +362,10 @@ def parse_nba_game(gid, day):
                      "name": f"{t.get('teamCity','')} {t.get('teamName','')}".strip(),
                      "pts": num(t["score"]), "q": (q + [0, 0, 0, 0])[:4], "ot": sum(q[4:]), "box": box}
     team_rows = [team_row(gid, day, sides, ha, opp) for ha, opp in (("home", "away"), ("away", "home"))]
+    refs = [o.get("name") or o.get("nameI") for o in g.get("officials") or []]
+    if [x for x in refs if x]:
+        for r in team_rows:
+            r["officials"] = [x for x in refs if x]
     player_rows = []
     for ha, opp in (("home", "away"), ("away", "home")):
         s, o = raw[ha], raw[opp]
@@ -378,6 +388,7 @@ def parse_nba_game(gid, day):
                 "dreb": num(st.get("reboundsDefensive")), "pf": num(st.get("foulsPersonal")),
                 "fga": num(st.get("fieldGoalsAttempted")), "fg3a": num(st.get("threePointersAttempted")),
                 "fta": num(st.get("freeThrowsAttempted")), "plus_minus": num(st.get("plusMinusPoints")),
+                "pos": p.get("position") or "",
             })
     return team_rows, player_rows
 
@@ -485,7 +496,8 @@ def slate(day):
             continue
         for o in comp.get("odds") or []:
             o["_home_abbr"] = side["home"]
-        games.append({"home": side["home"], "away": side["away"], "odds": parse_odds({"odds": comp.get("odds") or []})})
+        games.append({"id": ev.get("id"), "home": side["home"], "away": side["away"],
+                      "odds": parse_odds({"odds": comp.get("odds") or []})})
     return games
 
 
@@ -615,7 +627,24 @@ def compute(team_log, player_log):
                "min_l5": round(statistics.fmean(r["min"] for r in rows[:5]), 1),
                "min_cv": round(statistics.pstdev([r["min"] for r in eligible[:10]]) /
                                (statistics.fmean(r["min"] for r in eligible[:10]) or 1), 2),
+               "pos": next((r.get("pos") for r in rows if r.get("pos")), ""),
+               "min_season": round(statistics.fmean(r["min"] for r in eligible), 1),
+               "min_l3": round(statistics.fmean(r["min"] for r in rows[:3]), 1),
+               "started_last": bool(head.get("starter")),
+               "starts_l5": sum(bool(r.get("starter")) for r in rows[:5]),
+               "role": role_flags(rows[::-1]),          # as of his NEXT game: his most recent game counts as "last"
+               "last_game": head["date"],
                "markets": {}}
+        rec["min_trend"] = round(rec["min_l3"] - rec["min_season"], 1)
+        # game script: his own minutes and points in games decided by 15+ vs the rest
+        mg = {r["game_id"]: next((t["pts"] - t["opp_pts"] for t in team_log.get(r["game_id"], []) if t["team"] == r["team"]), 0)
+              for r in eligible}
+        blow, close = [r for r in eligible if abs(mg[r["game_id"]]) >= 15], [r for r in eligible if abs(mg[r["game_id"]]) < 15]
+        if len(blow) >= 2 and len(close) >= 2:
+            rec["blowout"] = {"n": len(blow), "min": round(statistics.fmean(r["min"] for r in blow), 1),
+                              "pts": round(statistics.fmean(r["pts"] for r in blow), 1),
+                              "min_close": round(statistics.fmean(r["min"] for r in close), 1),
+                              "pts_close": round(statistics.fmean(r["pts"] for r in close), 1)}
         for mk, fn in PLAYER_MARKETS.items():
             vals = [fn(r) for r in eligible if fn(r) is not None]
             if len(vals) < 3:
@@ -645,6 +674,22 @@ def compute(team_log, player_log):
             rec["markets"][mk] = blk
         players.append(rec)
     players.sort(key=lambda p: (p["team"], p["player"]))
+    # with/without splits against each team's top-5 minutes players
+    roster = {}
+    for rows in player_log.values():
+        for r in rows:
+            roster.setdefault((r["game_id"], r["team"]), {})[r["player_id"]] = r
+    cur_team = {p["player_id"]: p["team"] for p in players}
+    by_tm = {}
+    for pid, rows in by_player.items():
+        tm = cur_team.get(pid)
+        if tm:
+            by_tm.setdefault(tm, {})[pid] = [r for r in rows if r["team"] == tm]
+    for tm, rp in by_tm.items():
+        sp = with_without({k: v for k, v in rp.items() if v}, tm, None, roster)
+        for p in players:
+            if p["player_id"] in sp:
+                p["splits"] = sp[p["player_id"]]
 
     # --- teams
     by_team = {}
@@ -655,6 +700,33 @@ def compute(team_log, player_log):
     tabs = league_z({t["team"]: team_stat_table(by_team[t["team"]]) for t in teams})
     for t in teams:
         t["stats"] = tabs[t["team"]]          # every stat, for and against, with league rank and z-score
+    # what each team allows by position group (needs positions on player rows: stored from 2026-11-12 / after --rebuild)
+    allow = {}
+    for rows in player_log.values():
+        for r in rows:
+            g_ = pos_group(r.get("pos"))
+            if g_:
+                a = allow.setdefault(r["opp"], {}).setdefault(g_, {}).setdefault(r["game_id"], [0.0, 0.0, 0.0, 0.0])
+                a[0] += r["pts"]; a[1] += r["reb"]; a[2] += r["ast"]; a[3] += r["fg3m"]
+    pos_tab = {tm: {g_: {k: round(statistics.fmean(v[i] for v in gm.values()), 1) for i, k in enumerate(("pts", "reb", "ast", "fg3m"))}
+                    | {"games": len(gm)} for g_, gm in d.items() if len(gm) >= 3} for tm, d in allow.items()}
+    for g_ in ("G", "F", "C"):
+        for k in ("pts", "reb", "ast", "fg3m"):
+            vals = {tm: d[g_][k] for tm, d in pos_tab.items() if g_ in d}
+            order = sorted(vals, key=vals.get, reverse=True)
+            for tm in vals:
+                pos_tab[tm][g_][k + "_rank"] = order.index(tm) + 1
+    for t in teams:
+        t["allowed_by_position"] = pos_tab.get(t["team"]) or {}
+        sc = schedule_ctx(by_team[t["team"]], (datetime.date.today() + datetime.timedelta(days=1)).isoformat())
+        t["schedule"] = {"last_game": t["last_game"], "games_last_4_nights": sum(
+            (datetime.date.today() - datetime.date.fromisoformat(r["date"])).days <= 3 for r in by_team[t["team"]]),
+            "road_trip": sc["road_trip"]}
+        blow = [r for r in by_team[t["team"]] if abs(r["pts"] - r["opp_pts"]) >= 15]
+        if len(blow) >= 2:
+            t["blowout_script"] = {"n": len(blow), "q4_for": round(statistics.fmean(r["q4"] for r in blow), 1),
+                                   "q4_against": round(statistics.fmean(r["oq4"] for r in blow), 1),
+                                   "q4_for_all": round(statistics.fmean(r["q4"] for r in by_team[t["team"]]), 1)}
     winners = {t["team"] for t in teams if t["gp"] and t["w"] / t["gp"] > .5}
     for t in teams:
         t["records"]["vs_winning_teams"] = record(by_team[t["team"]], lambda r: r["opp"] in winners)
@@ -810,6 +882,10 @@ def team_profile(abbr, rows):
 # league average; margins carry real signal. Re-run tools/backtest.py before changing any constant here.
 SHRINK_K = 8            # pseudo-games of league-average mixed into every team rating
 B2B_PENALTY = 1.5       # points off a team playing the second night of a back-to-back
+THREE_IN_FOUR_PENALTY = 1.5   # points off a team on its 3rd game in 4 nights (measured -2.6 on 65 games; half applied)
+TEAM_TZ = {"BOS": -5, "BKN": -5, "NY": -5, "PHI": -5, "TOR": -5, "CHI": -6, "CLE": -5, "DET": -5, "IND": -5, "MIL": -6,
+           "ATL": -5, "CHA": -5, "MIA": -5, "ORL": -5, "WSH": -5, "DEN": -7, "MIN": -6, "OKC": -6, "POR": -8, "UTAH": -7,
+           "GS": -8, "LAC": -8, "LAL": -8, "PHX": -7, "SAC": -8, "DAL": -6, "HOU": -6, "MEM": -6, "NO": -6, "SA": -6}
 MODEL_MIN_GAMES = 3     # both teams need this many games or no projection is made
 SEG_SHARE = {"1Q": 0.25, "1H": 0.5, "2H": 0.5}   # replaced by league shares when computed
 BOOK_TRUST = 0.5        # when the model disagrees with a posted line, believe only this share of the gap: the
@@ -845,7 +921,30 @@ def league_context(rows):
             "margin_sd": statistics.pstdev([r["pts"] - r["opp_pts"] for r in home]) if len(home) > 5 else 14.0}
 
 
-def predict_game(H, A, lg, rest_h=3, rest_a=3):
+def schedule_ctx(rows, date, team=None, home=None, opp=None):
+    """Rest and travel going into `date`, from a team's prior rows: rest days, back-to-back, 3rd game in 4 nights,
+    4th in 6, straight road games before this one, and time zones crossed since the last game."""
+    prior = sorted((r for r in rows if r["date"] < date), key=lambda r: r["date"])
+    if not prior:
+        return {"rest": 3, "b2b": False, "three_in_four": False, "four_in_six": False, "road_trip": 0, "tz_shift": 0}
+    t = datetime.date.fromisoformat(date)
+    ds = [datetime.date.fromisoformat(r["date"]) for r in prior]
+    trip = 0
+    for r in reversed(prior):
+        if r["home"]:
+            break
+        trip += 1
+    last = prior[-1]
+    where_prev = TEAM_TZ.get(last["team"] if last["home"] else last["opp"])
+    where_now = TEAM_TZ.get(team if home else opp) if team else None
+    return {"rest": (t - ds[-1]).days, "b2b": (t - ds[-1]).days == 1,
+            "three_in_four": sum((t - x).days <= 3 for x in ds) >= 2,
+            "four_in_six": sum((t - x).days <= 5 for x in ds) >= 3,
+            "road_trip": 0 if home else trip,
+            "tz_shift": (where_now - where_prev) if (where_now is not None and where_prev is not None) else 0}
+
+
+def predict_game(H, A, lg, rest_h=3, rest_a=3, tif_h=False, tif_a=False):
     """H, A = each team's prior rows (any order). Returns projected home/away points or None."""
     H, A = [r for r in H if _poss(r)], [r for r in A if _poss(r)]
     if lg is None or len(H) < MODEL_MIN_GAMES or len(A) < MODEL_MIN_GAMES:
@@ -853,8 +952,8 @@ def predict_game(H, A, lg, rest_h=3, rest_a=3):
     pace = _shrunk([_poss(r) for r in H], lg["pos"]) * _shrunk([_poss(r) for r in A], lg["pos"]) / lg["pos"]
     off = lambda X: _shrunk([r["pts"] / _poss(r) for r in X], lg["eff"])
     dfn = lambda X: _shrunk([r["opp_pts"] / _poss(r) for r in X], lg["eff"])
-    ph = pace * off(H) * dfn(A) / lg["eff"] + lg["hca"] - (B2B_PENALTY if rest_h == 1 else 0)
-    pa = pace * off(A) * dfn(H) / lg["eff"] - lg["hca"] - (B2B_PENALTY if rest_a == 1 else 0)
+    ph = pace * off(H) * dfn(A) / lg["eff"] + lg["hca"] - (B2B_PENALTY if rest_h == 1 else 0) - (THREE_IN_FOUR_PENALTY if tif_h else 0)
+    pa = pace * off(A) * dfn(H) / lg["eff"] - lg["hca"] - (B2B_PENALTY if rest_a == 1 else 0) - (THREE_IN_FOUR_PENALTY if tif_a else 0)
     return ph, pa
 
 
@@ -888,7 +987,8 @@ def walk_forward_accuracy(team_log):
     for date, h, a in games:
         H, A = hist.get(h["team"], []), hist.get(a["team"], [])
         lg = league_context(seen)
-        p = predict_game(H, A, lg, _rest_days(H, date), _rest_days(A, date))
+        ch, ca = schedule_ctx(H, date), schedule_ctx(A, date)
+        p = predict_game(H, A, lg, ch["rest"], ca["rest"], ch["three_in_four"], ca["three_in_four"])
         if p:
             ph, pa = p
             at, am = h["pts"] + a["pts"], h["pts"] - a["pts"]
@@ -941,8 +1041,11 @@ def project_slate(team_log, games, day, acc):
     for g in games:
         H, A = by_team.get(g["home"], []), by_team.get(g["away"], [])
         d = day.isoformat()
-        p = predict_game(H, A, lg, _rest_days(H, d), _rest_days(A, d))
-        rec = {"home": g["home"], "away": g["away"], "book": g.get("odds") or {}}
+        ch = schedule_ctx(H, d, g["home"], True, g["away"])
+        ca = schedule_ctx(A, d, g["away"], False, g["home"])
+        p = predict_game(H, A, lg, ch["rest"], ca["rest"], ch["three_in_four"], ca["three_in_four"])
+        rec = {"home": g["home"], "away": g["away"], "book": g.get("odds") or {}, "id": g.get("id"),
+               "open": g.get("open") or {}, "officials": g.get("officials") or []}
         if not p:
             rec["ok"], rec["why"] = False, f"need {MODEL_MIN_GAMES}+ games for both teams"
         else:
@@ -950,7 +1053,7 @@ def project_slate(team_log, games, day, acc):
             rec.update({"ok": True, "home_pts": round(ph, 1), "away_pts": round(pa, 1), "total": round(ph + pa, 1),
                         "home_margin": round(ph - pa, 1), "home_win_prob": _win_prob(ph - pa, sd),
                         "segments": {k: round((ph + pa) * v, 1) for k, v in lg["share"].items()},
-                        "home_b2b": _rest_days(H, d) == 1, "away_b2b": _rest_days(A, d) == 1})
+                        "home_b2b": ch["b2b"], "away_b2b": ca["b2b"], "home_sched": ch, "away_sched": ca})
             bk = rec["book"]
             def _team_grade(gap, sd_, pos, neg):
                 pr = _norm_cdf(BOOK_TRUST * abs(gap) / sd_)
@@ -1164,7 +1267,7 @@ def fit_matchups(team_log, player_log):
                            for mk, e in err.items() if e[2]}}
 
 
-def build_grades(players, teams, games, proj_games, fit, day):
+def build_grades(players, teams, games, proj_games, fit, day, injuries=None, context=None):
     """Today's slate: every player x market graded from his own numbers, his minutes and the opponent matchup;
     plus, per game, every stat ranked strength-vs-weakness with the players it points to."""
     tables = {t["team"]: t.get("stats") or {} for t in teams}
@@ -1177,26 +1280,77 @@ def build_grades(players, teams, games, proj_games, fit, day):
         if p is not None and (p >= 0.75 or p <= 0.25):
             lop.update((g["home"], g["away"]))
     c, bias = fit["calibration"]["c"], fit["calibration"].get("bias", 0.0)
+    context = context or {}
+    inj = {}
+    for x in injuries or []:
+        inj[(str(x.get("player") or "").lower(), x.get("team"))] = x
+    st_of = lambda pl: inj.get((pl["player"].lower(), pl["team"]))
+    sched = {}
+    for g in proj_games or []:
+        sched[g["home"]], sched[g["away"]] = g.get("home_sched") or {}, g.get("away_sched") or {}
+    fav = {}
+    for g in proj_games or []:
+        if g.get("ok"):
+            fav[g["home"]], fav[g["away"]] = g["home_win_prob"], 1 - g["home_win_prob"]
+    # each team's top-3 minutes players, and which of them are ruled out tonight
+    top3, out_top = {}, {}
+    for pl in players:
+        if pl["team"] in opp_of and pl["eligible_gp"] >= 5:
+            top3.setdefault(pl["team"], []).append(pl)
+    for tm, lst in top3.items():
+        lst.sort(key=lambda p: -p["min_season"])
+        top3[tm] = lst[:3]
+        out_top[tm] = [p["player"] for p in top3[tm] if (st_of(p) or {}).get("kind") == "out"]
+    sat_out = []
     out_players, by_team = [], {}
     for pl in players:
         tm = pl["team"]
         if tm not in opp_of or pl["eligible_gp"] < 5 or (pl.get("min_l5") or 0) < MIN_MINUTES:
             continue
+        status = st_of(pl)
+        if status and status["kind"] == "out":
+            sat_out.append({"player": pl["player"], "team": tm, "status": status["status"], "detail": status["detail"],
+                            "min_season": pl["min_season"]})
+            continue
+        wp = fav.get(tm)
+        flags = {"teammate_out": any(n_ != pl["player"] for n_ in out_top.get(tm, [])),
+                 "new_starter": pl["role"]["new_starter"], "to_bench": pl["role"]["to_bench"],
+                 "big_fav": wp is not None and wp >= BIG_FAV and pl["min_season"] >= 24,
+                 "big_dog": wp is not None and wp <= 1 - BIG_FAV and pl["min_season"] >= 24,
+                 "b2b": bool(sched.get(tm, {}).get("b2b")), "three_in_four": bool(sched.get(tm, {}).get("three_in_four"))}
+        pg_ = pos_group(pl.get("pos"))
         rec = {"player": pl["player"], "team": tm, "opp": opp_of[tm], "home": home_of[tm], "min_l5": pl["min_l5"],
-               "min_cv": pl.get("min_cv", 0.1), "n": pl["eligible_gp"], "lopsided": tm in lop, "markets": {}}
+               "min_cv": pl.get("min_cv", 0.1), "n": pl["eligible_gp"], "lopsided": tm in lop, "pos": pl.get("pos", ""),
+               "min_season": pl["min_season"], "min_trend": pl["min_trend"], "starts_l5": pl["starts_l5"],
+               "status": status and {"status": status["status"], "kind": status["kind"], "detail": status["detail"]},
+               "flags": [k for k, v in flags.items() if v],
+               "out_teammates": [n_ for n_ in out_top.get(tm, []) if n_ != pl["player"]],
+               "splits": [sp for sp in pl.get("splits", []) if sp["teammate"] in out_top.get(tm, [])] or pl.get("splits", [])[:2],
+               "blowout": pl.get("blowout"),
+               "pos_def": (next((t.get("allowed_by_position", {}).get(pg_) for t in teams if t["team"] == opp_of[tm]), None)
+                           if pg_ else None),
+               "markets": {}}
         for mk, b in pl["markets"].items():
             if b.get("proj") is None or not b.get("proj_sd"):
                 continue
             mult, fx = matchup_adjust(mk, tables.get(opp_of[tm]), fit["effects"])
-            adj, sd = b["proj"] * mult, max(b["proj_sd"], 0.75 * (b["proj"] + 0.25) ** 0.5)
-            g = grade_pick(adj, sd, b["line"], c, pl["eligible_gp"], pl["min_l5"], rec["min_cv"], tm in lop, bias=bias)
+            cmult, cx = context_adjust(mk, flags, context)
+            adj, sd = b["proj"] * mult * cmult, max(b["proj_sd"], 0.75 * (b["proj"] + 0.25) ** 0.5)
+            # blowout risk is now a measured effect inside cmult, so the blanket one-grade penalty is not applied twice
+            g = grade_pick(adj, sd, b["line"], c, pl["eligible_gp"], pl["min_l5"], rec["min_cv"],
+                           tm in lop and not any(f in flags and flags[f] for f in ("big_fav", "big_dog")), bias=bias)
+            if status:
+                i_ = [x[0] for x in GRADE_BANDS].index(g["grade"])
+                g["grade"] = GRADE_BANDS[min(i_ + 1, len(GRADE_BANDS) - 1)][0]
+                g["notes"].append(f"listed {status['status']} ({status['detail']}) - one grade down; confirm he plays")
             if b["line_source"] == "signal-median":
                 if b["line"] < 1.5:
                     continue      # "under 0.5 blocks" for a guard is true and worthless: no book hangs that number
                 g["notes"].append("graded against SIGNAL's baseline, not a posted line - enter the book's number to grade the real bet")
             rec["markets"][mk] = {"base": b["proj"], "adj": round(adj, 1), "sd": round(sd, 1), "line": b["line"],
                                   "book": b["line_source"] != "signal-median", "src": b["line_source"],
-                                  "fx": [[STAT_LABELS.get(st_, st_), rk, pct] for st_, rk, pct in fx], **g}
+                                  "fx": [[STAT_LABELS.get(st_, st_), rk, pct] for st_, rk, pct in fx],
+                                  "cx": [[lab, pct] for lab, pct in cx], **g}
         out_players.append(rec)
         by_team.setdefault(tm, []).append(rec)
     out_games = []
@@ -1225,8 +1379,287 @@ def build_grades(players, teams, games, proj_games, fit, day):
             gm["edges"][off] = rows
         out_games.append(gm)
     return {"generated": STAMP, "date": day.isoformat(), "calibration_c": c, "calibration_bias": bias,
-            "bands": [list(b) for b in GRADE_BANDS],
+            "bands": [list(b) for b in GRADE_BANDS], "out": sat_out, "injuries_known": injuries is not None,
             "players": out_players, "games": out_games}
+
+
+# ---------------------------------------------------------------- context: injuries, roles, game script, refs, lines
+CONTEXT_SHRINK = 0.5     # apply half of every measured context effect
+CONTEXT_MIN_N = 40       # flagged player-games needed before an effect is used
+CONTEXT_CAP = 0.20       # all context effects together never move a projection more than 20%
+BIG_FAV = 0.70           # pregame model win probability that counts as a likely blowout
+MARKET_GROUP = {"PTS": "scoring", "FGM": "scoring", "FGA": "scoring", "3PM": "scoring", "3PA": "scoring", "FTM": "scoring",
+                "FTA": "scoring", "PRA": "scoring", "PR": "scoring", "PA": "scoring", "REB": "rebounding",
+                "OREB": "rebounding", "DREB": "rebounding", "RA": "rebounding", "AST": "assists"}   # others -> "minutes"
+CONTEXT_LABELS = {"teammate_out": "a top-3 teammate is out", "new_starter": "just moved into the starting five",
+                  "to_bench": "just moved to the bench", "big_fav": "heavy favourite (blowout risk)",
+                  "big_dog": "heavy underdog (blowout risk)", "b2b": "second night of a back-to-back",
+                  "three_in_four": "3rd game in 4 nights"}
+ODDS_API = "https://api.the-odds-api.com/v4/sports/basketball_nba"
+ODDS_MARKETS = {"player_points": "PTS", "player_rebounds": "REB", "player_assists": "AST"}   # 3 credits per game
+INJURIES_JSON = os.path.join(DATA, "injuries.json")
+
+
+def pos_group(pos):
+    pos = (pos or "").upper()
+    return "C" if pos.startswith("C") else "F" if ("F" in pos and not pos.startswith("G")) else "G" if pos else ""
+
+
+def fetch_injuries(teams):
+    """ESPN's league injury report -> [{player, player_id, team, status, kind, detail, date}]. kind is
+    'out' | 'doubtful' | 'dtd'. Free, no key. [] on any failure (grades then simply carry no injury info)."""
+    name_to_abbr = {t["team_name"]: t["team"] for t in teams}
+    try:
+        data = get(f"{ESPN}/injuries")
+    except Exception as e:
+        print(f"injuries: fetch failed ({e})")
+        return None
+    out = []
+    for tm in data.get("injuries") or []:
+        abbr = name_to_abbr.get(tm.get("displayName"))
+        for it in tm.get("injuries") or []:
+            ath = it.get("athlete") or {}
+            ab = abbr or ((ath.get("team") or {}).get("abbreviation"))
+            status = str(it.get("status") or (it.get("type") or {}).get("description") or "")
+            low = status.lower()
+            kind = "out" if ("out" in low or "suspen" in low) else "doubtful" if "doubt" in low else "dtd"
+            det = it.get("details") or {}
+            out.append({"player": ath.get("displayName"), "player_id": str(ath.get("id") or ""), "team": ab,
+                        "status": status, "kind": kind, "date": str(it.get("date") or "")[:10],
+                        "detail": " ".join(x for x in (det.get("type"), det.get("detail"), det.get("side")) if x)
+                                  or (it.get("shortComment") or "")[:120]})
+    print(f"injuries: {len(out)} listed ({sum(x['kind'] == 'out' for x in out)} out)")
+    return out
+
+
+def pregame_probs(team_log):
+    """{(game_id, team): model win probability BEFORE the game} for every stored game, walk-forward."""
+    games = []
+    for gid, rows in team_log.items():
+        if len(rows) == 2:
+            h, a = (rows[0], rows[1]) if rows[0]["home"] else (rows[1], rows[0])
+            games.append((h["date"], gid, h, a))
+    games.sort(key=lambda g: g[0])
+    hist, seen, out = {}, [], {}
+    for date, gid, h, a in games:
+        H, A = hist.get(h["team"], []), hist.get(a["team"], [])
+        ch, ca = schedule_ctx(H, date), schedule_ctx(A, date)
+        p = predict_game(H, A, league_context(seen), ch["rest"], ca["rest"], ch["three_in_four"], ca["three_in_four"])
+        if p:
+            wp = _win_prob(p[0] - p[1], 15.0)
+            out[(gid, h["team"])], out[(gid, a["team"])] = wp, 1 - wp
+        out[(gid, h["team"], "ctx")], out[(gid, a["team"], "ctx")] = ch, ca
+        hist.setdefault(h["team"], []).append(h); hist.setdefault(a["team"], []).append(a); seen += [h, a]
+    return out
+
+
+def role_flags(prior_rows):
+    """From a player's earlier games (oldest first): did his role just change? Knowable before tip-off."""
+    if len(prior_rows) < 4:
+        return {"new_starter": False, "to_bench": False}
+    last, before = prior_rows[-1], prior_rows[-6:-1]
+    rate = statistics.fmean(bool(r.get("starter")) for r in before)
+    return {"new_starter": bool(last.get("starter")) and rate <= 0.2,
+            "to_bench": (not last.get("starter")) and rate >= 0.8}
+
+
+def fit_context(team_log, player_log):
+    """Walk-forward: how did players do, relative to their own prior average, in each tracked situation?
+    Every situation is defined only from information available before the game (the teammate-out flag stands in
+    for the injury report). Returns {flag: {group: {effect_pct, n, used}}}."""
+    pre = pregame_probs(team_log)
+    prows = sorted((r for g in player_log.values() for r in g), key=lambda r: r["date"])
+    roster = {}
+    for r in prows:
+        roster.setdefault((r["game_id"], r["team"]), {})[r["player_id"]] = r
+    order = sorted({(r["date"], r["game_id"], r["team"]) for r in prows})
+    phist, tgames = {}, {}
+    val = {"scoring": lambda r: r["pts"], "rebounding": lambda r: r["reb"], "assists": lambda r: r["ast"], "minutes": lambda r: r["min"]}
+    acc = {}        # (flag, group) -> [sum diff, sum mean, n]   ;  ("_base", group) for unflagged
+    for date, gid, tm in order:
+        here = roster[(gid, tm)]
+        seen_p = {pid for g in tgames.get(tm, []) for pid in roster[(g, tm)]}
+        mins = {pid: [h["min"] for h in phist.get(pid, []) if h["team"] == tm] for pid in seen_p}
+        top = sorted((pid for pid, m in mins.items() if len(m) >= 5), key=lambda pid: -statistics.fmean(mins[pid]))[:3]
+        absent = [pid for pid in top if pid not in here or here[pid]["min"] < 1]
+        sc = pre.get((gid, tm, "ctx")) or {}
+        wp = pre.get((gid, tm))
+        for pid, r in here.items():
+            allp = phist.get(pid, [])
+            H = [h for h in allp if h["min"] >= MIN_MINUTES]
+            if len(H) < 5 or r["min"] < MIN_MINUTES:
+                continue
+            avg_min = statistics.fmean(h["min"] for h in H)
+            rf = role_flags(allp)
+            flags = {"teammate_out": any(x != pid for x in absent), "new_starter": rf["new_starter"], "to_bench": rf["to_bench"],
+                     "big_fav": wp is not None and wp >= BIG_FAV and avg_min >= 24,
+                     "big_dog": wp is not None and wp <= 1 - BIG_FAV and avg_min >= 24,
+                     "b2b": bool(sc.get("b2b")), "three_in_four": bool(sc.get("three_in_four"))}
+            for grp, fn in val.items():
+                m = statistics.fmean(fn(h) for h in H)
+                if m < (3 if grp != "minutes" else 1):
+                    continue
+                d = fn(r) - m
+                any_flag = False
+                for fl, on in flags.items():
+                    if on:
+                        a = acc.setdefault((fl, grp), [0.0, 0.0, 0]); a[0] += d; a[1] += m; a[2] += 1; any_flag = True
+                if not any_flag:
+                    a = acc.setdefault(("_base", grp), [0.0, 0.0, 0]); a[0] += d; a[1] += m; a[2] += 1
+        for pid, r in here.items():
+            phist.setdefault(pid, []).append(r)
+        tgames.setdefault(tm, []).append(gid)
+    out = {}
+    for (fl, grp), a in acc.items():
+        if fl == "_base" or not a[1]:
+            continue
+        b = acc.get(("_base", grp), [0.0, 1.0, 0])
+        eff = a[0] / a[1] - (b[0] / b[1] if b[1] else 0)
+        out.setdefault(fl, {})[grp] = {"effect_pct": round(100 * eff, 1), "n": a[2], "used": a[2] >= CONTEXT_MIN_N}
+    return out
+
+
+def context_adjust(market, flags, effects):
+    """(multiplier, [(label, pct)]) for the situations a player is in tonight."""
+    grp = MARKET_GROUP.get(market, "minutes")
+    parts = []
+    for fl, on in flags.items():
+        e = (effects.get(fl) or {}).get(grp)
+        if on and e and e["used"]:
+            parts.append((CONTEXT_LABELS.get(fl, fl), CONTEXT_SHRINK * e["effect_pct"]))
+    tot = max(-CONTEXT_CAP, min(CONTEXT_CAP, sum(x[1] for x in parts) / 100))
+    return 1.0 + tot, [(lab, round(pct, 1)) for lab, pct in parts]
+
+
+def with_without(rows_by_player, team, team_game_ids, roster):
+    """For every player on `team`: his averages with and without each of the team's top-5 minutes players."""
+    mins = {pid: statistics.fmean(r["min"] for r in rows) for pid, rows in rows_by_player.items() if len(rows) >= 3}
+    top = sorted(mins, key=lambda pid: -mins[pid])[:5]
+    out = {}
+    for pid, rows in rows_by_player.items():
+        mine = {r["game_id"]: r for r in rows if r["min"] >= MIN_MINUTES}
+        res = []
+        for t in top:
+            if t == pid:
+                continue
+            w = [r for gid, r in mine.items() if roster.get((gid, team), {}).get(t, {}).get("min", 0) >= 1]
+            wo = [r for gid, r in mine.items() if roster.get((gid, team), {}).get(t, {}).get("min", 0) < 1]
+            if len(wo) >= 2 and len(w) >= 2:
+                f = lambda X, k: round(statistics.fmean(r[k] for r in X), 1)
+                res.append({"teammate": rows_by_player[t][0]["player"], "n_with": len(w), "n_without": len(wo),
+                            **{f"{k}_with": f(w, k) for k in ("pts", "reb", "ast", "min")},
+                            **{f"{k}_without": f(wo, k) for k in ("pts", "reb", "ast", "min")}})
+        if res:
+            out[pid] = res
+    return out
+
+
+def ref_table(team_log):
+    """Per official: games worked, and how those games ran vs the league (points, fouls, free throws)."""
+    games = [rows for rows in team_log.values() if len(rows) == 2 and rows[0].get("officials")]
+    if not games:
+        return {"games_with_crews": 0, "officials": []}
+    met = lambda rows: (rows[0]["pts"] + rows[1]["pts"], rows[0].get("pf", 0) + rows[1].get("pf", 0),
+                        rows[0].get("fta", 0) + rows[1].get("fta", 0))
+    lg = [statistics.fmean(x) for x in zip(*(met(g) for g in games))]
+    per = {}
+    for g in games:
+        for o in g[0]["officials"]:
+            per.setdefault(o, []).append(met(g))
+    out = []
+    for o, v in per.items():
+        a = [statistics.fmean(x) for x in zip(*v)]
+        out.append({"official": o, "games": len(v), "total_pts": round(a[0], 1), "fouls": round(a[1], 1), "fta": round(a[2], 1),
+                    "pts_vs_lg": round(a[0] - lg[0], 1), "fouls_vs_lg": round(a[1] - lg[1], 1), "fta_vs_lg": round(a[2] - lg[2], 1)})
+    out.sort(key=lambda x: -x["games"])
+    return {"games_with_crews": len(games), "league": {"total_pts": round(lg[0], 1), "fouls": round(lg[1], 1), "fta": round(lg[2], 1)},
+            "officials": out}
+
+
+def todays_officials(games):
+    """Crews are usually posted a few hours before tip; ask ESPN's summary for each of today's games."""
+    for g in games:
+        if not g.get("id"):
+            continue
+        try:
+            info = get(f"{ESPN}/summary?event={g['id']}").get("gameInfo") or {}
+            g["officials"] = [o.get("displayName") or o.get("fullName") for o in info.get("officials") or [] if o]
+        except Exception:
+            g["officials"] = []
+        time.sleep(0.15)
+    return games
+
+
+def record_line_history(day, games):
+    """Append every posted number we see to lines/history-<day>.csv so opening vs current can be compared."""
+    path = os.path.join(LINES_DIR, f"history-{day.isoformat()}.csv")
+    os.makedirs(LINES_DIR, exist_ok=True)
+    first = {}
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as f:
+            for r in csv.DictReader(f):
+                first.setdefault((r["home"], r["segment"]), float(r["line"]))
+    new = not os.path.exists(path)
+    with open(path, "a", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        if new:
+            w.writerow(["seen", "home", "segment", "line", "book"])
+        for g in games:
+            o = g.get("odds") or {}
+            for seg, key in (("FULL", "total"), ("SPREAD", "home_spread")):
+                if key in o:
+                    w.writerow([STAMP, g["home"], seg, o[key], o.get("book", "")])
+                    first.setdefault((g["home"], seg), o[key])
+    for g in games:
+        g["open"] = {k: first[(g["home"], seg)] for seg, k in (("FULL", "total"), ("SPREAD", "home_spread"))
+                     if (g["home"], seg) in first}
+    return games
+
+
+def fetch_prop_lines(day):
+    """OPTIONAL and OFF unless the environment variable ODDS_API_KEY is set (The Odds API's free tier: 500
+    credits a month, no card). Pulls points/rebounds/assists lines (3 credits per game) once per day and writes
+    data/nba/lines/<day>.csv in the same player,market,line,book format as a hand-typed file. Stops when fewer
+    than 60 credits remain. Without a key nothing is called and nothing is charged."""
+    key = os.environ.get("ODDS_API_KEY")
+    path = os.path.join(LINES_DIR, f"{day.isoformat()}.csv")
+    if not key or os.path.exists(path):
+        return 0
+    try:
+        events = get(f"{ODDS_API}/events?apiKey={key}")
+    except Exception as e:
+        print(f"props: events failed ({e})")
+        return 0
+    rows = []
+    for ev in events if isinstance(events, list) else []:
+        if str(ev.get("commence_time", ""))[:10] not in (day.isoformat(), (day + datetime.timedelta(days=1)).isoformat()):
+            continue
+        try:
+            req = urllib.request.Request(f"{ODDS_API}/events/{ev['id']}/odds?apiKey={key}&regions=us&oddsFormat=american"
+                                         f"&markets={','.join(ODDS_MARKETS)}", headers={"User-Agent": "Mozilla/5.0"})
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                left = resp.headers.get("x-requests-remaining")
+                data = json.loads(resp.read().decode())
+        except Exception as e:
+            print(f"props: {ev.get('id')} failed ({e})")
+            continue
+        seen = set()
+        for bk in data.get("bookmakers") or []:
+            for m in bk.get("markets") or []:
+                mk = ODDS_MARKETS.get(m.get("key"))
+                for o in m.get("outcomes") or []:
+                    who = o.get("description")
+                    if mk and who and o.get("point") is not None and str(o.get("name")).lower() == "over" and (who, mk) not in seen:
+                        seen.add((who, mk)); rows.append((who, mk, o["point"], bk.get("title") or bk.get("key")))
+        if left is not None and float(left) < 60:
+            print(f"props: {left} credits left this month - stopping to stay inside the free tier")
+            break
+    if rows:
+        os.makedirs(LINES_DIR, exist_ok=True)
+        with open(path, "w", newline="", encoding="utf-8") as f:
+            w = csv.writer(f); w.writerow(["player", "market", "line", "book"]); w.writerows(rows)
+    print(f"props: {len(rows)} posted player lines written")
+    return len(rows)
 
 
 # ---------------------------------------------------------------- report
@@ -1383,6 +1816,9 @@ def main():
     games = [] if (a.rates_only or a.no_lines) else slate(today)
     if games:
         capture_today_lines(today, games)
+        record_line_history(today, games)
+        todays_officials(games)
+        fetch_prop_lines(today)          # does nothing unless ODDS_API_KEY is set
     acc = walk_forward_accuracy(team_log)
     save(os.path.join(DATA, "accuracy.json"), acc)
     if games:
@@ -1395,9 +1831,16 @@ def main():
     fit = fit_matchups(team_log, player_log)
     acc["matchup_effects"], acc["calibration"], acc["player_mae"] = fit["effects"], fit["calibration"], fit["player_mae"]
     save(os.path.join(DATA, "accuracy.json"), acc)
+    ctx_fx = fit_context(team_log, player_log)
+    acc["context_effects"] = ctx_fx
+    save(os.path.join(DATA, "accuracy.json"), acc)
+    save(os.path.join(DATA, "refs.json"), {"generated": STAMP, **ref_table(team_log)})
+    injuries = None if a.rates_only else fetch_injuries(teams)
+    if injuries is not None:
+        save(INJURIES_JSON, {"generated": STAMP, "players": injuries})
     if games:
         pj = load(os.path.join(DATA, "projections.json"), {}).get("games")
-        save(os.path.join(DATA, "grades.json"), build_grades(players, teams, games, pj, fit, today))
+        save(os.path.join(DATA, "grades.json"), build_grades(players, teams, games, pj, fit, today, injuries, ctx_fx))
     days = load(os.path.join(DATA, "ingested_days.json"), [])
     save(RATES_JSON, {"generated": STAMP, "through": days[-1] if days else None,
                       "min_minutes": MIN_MINUTES, "players": players})
