@@ -61,6 +61,27 @@ Onyeka Okongwu,REB,8.5,FD
 Commit it. Those player/markets are then graded against the posted line and labelled with the book;
 everything else stays on the `signal-median` line (median of the last 20 eligible games, rounded to .5 — the player's season baseline).
 
+## 4c. Projections and the accuracy scoreboard (since 2026-11-12)
+
+Every run writes two more files:
+
+* `data/nba/accuracy.json` — SIGNAL grading itself. Every stored game is predicted **from prior games only** and
+  scored: average miss on total / margin / team points and winner %, for the SIGNAL model, the old own-median
+  line, the league average, and (once `--backfill-lines` has run) the book's closing number. It also keeps the
+  record of games where the model disagreed with the book by 3+ points. If the model is not beating a baseline
+  here, it is not accurate, whatever a single night looks like.
+* `data/nba/projections.json` — today's games: projected score, total, margin, win probability, quarter/half
+  totals, back-to-back flags, and the gap to the posted total and spread.
+
+Model (constants at the top of the projection section in `nba_tracker.py`): pace x efficiency, every team
+rating shrunk 8 games toward the league average, home court measured from the data, -1.5 on a back-to-back.
+Chosen by walk-forward test (`tools/model_experiments.py`); on 112 games it missed totals by 14.5 and margins by
+12.2 vs 16.1 / 14.0 for the old median line. Totals are barely more predictable than the league average.
+
+Players: each market now carries `proj` (season mean of 15+ minute games) and `proj_sd`. On 1,081 player-games
+the season mean beat the L20 median, per-minute x minutes, opponent adjustment and every recency blend;
+the last-5 average was the worst predictor. `proj_edge` appears only when a real book line is on file.
+
 ## 5. What lives where
 
 | File | What |

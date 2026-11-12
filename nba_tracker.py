@@ -425,23 +425,32 @@ def backfill_lines(team_log):
     return n
 
 
-def capture_today_lines(day):
-    """Write today's pregame total/spread from the ESPN scoreboard to data/nba/lines/team-<day>.csv
-    (home,segment,line,book) so Jarvis and the site grade against a posted number, not a median."""
+def slate(day):
+    """Today's games from the ESPN scoreboard: [{home, away, odds:{total,home_spread,book}}]. [] on failure."""
     try:
         sb = get(f"{ESPN}/scoreboard?dates={day:%Y%m%d}")
     except Exception as e:
-        print(f"lines: scoreboard for {day} failed ({e})")
-        return 0
-    out = []
+        print(f"slate: scoreboard for {day} failed ({e})")
+        return []
+    games = []
     for ev in sb.get("events", []):
         comp = (ev.get("competitions") or [{}])[0]
-        home = next((c["team"]["abbreviation"] for c in comp.get("competitors", []) if c.get("homeAway") == "home"), None)
-        if not home:
+        side = {c.get("homeAway"): c["team"]["abbreviation"] for c in comp.get("competitors", []) if c.get("team")}
+        if "home" not in side or "away" not in side:
             continue
         for o in comp.get("odds") or []:
-            o["_home_abbr"] = home
-        odds = parse_odds({"odds": comp.get("odds") or []})
+            o["_home_abbr"] = side["home"]
+        games.append({"home": side["home"], "away": side["away"], "odds": parse_odds({"odds": comp.get("odds") or []})})
+    return games
+
+
+def capture_today_lines(day, games=None):
+    """Write today's pregame total/spread from the ESPN scoreboard to data/nba/lines/team-<day>.csv
+    (home,segment,line,book) so Jarvis and the site grade against a posted number, not a median."""
+    games = slate(day) if games is None else games
+    out = []
+    for g in games:
+        home, odds = g["home"], g["odds"]
         if "total" in odds:
             out.append((home, "FULL", odds["total"], odds["book"]))
         if "home_spread" in odds:
@@ -571,8 +580,13 @@ def compute(team_log, player_log):
                 base = vals[:20]
                 line, src = half_round(statistics.median(base), statistics.fmean(base)), "signal-median"
             blk = rate_block(vals, line)
+            # proj: season mean of eligible games. Walk-forward on 1,081 player-games (2026-11-12) it beat the
+            # L20 median, per-minute x minutes, opponent-adjusted and every recency blend; L5 average was WORST.
+            proj = statistics.fmean(vals)
             blk.update({"line": line, "line_source": src,
-                        "cushion": round((blk["median_l10"] or 0) - line, 1)})
+                        "cushion": round((blk["median_l10"] or 0) - line, 1),
+                        "proj": round(proj, 1), "proj_sd": round(statistics.pstdev(vals), 1) if len(vals) > 2 else None,
+                        "proj_edge": round(proj - line, 1) if src != "signal-median" else None})
             # trap flag: recent window diverges hard from the longer sample
             if blk.get("n_l20", 0) >= 12 and blk.get("n_l5", 0) == 5:
                 l5 = blk["over_l5"] / 5
@@ -718,6 +732,160 @@ def team_profile(abbr, rows):
                     "away_over": sum(fn(r) > line for r in away), "away_n": len(away)})
         rec["markets"][mk] = blk
     return rec
+
+
+# ---------------------------------------------------------------- projection model
+# Chosen by walk-forward test on 2026-11-12 (112 games): pace x efficiency with every rating shrunk toward the
+# league average (K pseudo-games) beat the old own-median line by ~1.8 pts on totals and margins, and nothing
+# tested (recency weighting, heavier/lighter shrinkage) beat it reliably. Totals are barely predictable beyond the
+# league average; margins carry real signal. Re-run tools/backtest.py before changing any constant here.
+SHRINK_K = 8            # pseudo-games of league-average mixed into every team rating
+B2B_PENALTY = 1.5       # points off a team playing the second night of a back-to-back
+MODEL_MIN_GAMES = 3     # both teams need this many games or no projection is made
+SEG_SHARE = {"1Q": 0.25, "1H": 0.5, "2H": 0.5}   # replaced by league shares when computed
+
+
+def _poss(r):
+    try:
+        return (r["fga"] + 0.44 * r["fta"] - r["oreb"] + r["tov"]
+                + r["opp_fga"] + 0.44 * r["opp_fta"] - r["opp_oreb"] + r["opp_tov"]) / 2
+    except KeyError:
+        return None
+
+
+def _shrunk(vals, prior, k=SHRINK_K):
+    return (sum(vals) + k * prior) / (len(vals) + k) if vals else prior
+
+
+def league_context(rows):
+    """League averages from a list of team rows (all before the game being predicted)."""
+    rows = [r for r in rows if _poss(r)]
+    if len(rows) < 40:
+        return None
+    pts = statistics.fmean(r["pts"] for r in rows)
+    pos = statistics.fmean(_poss(r) for r in rows)
+    home = [r for r in rows if r["home"]]
+    hca = statistics.fmean(r["pts"] - r["opp_pts"] for r in home) / 2 if home else 1.5
+    full = sum(r["pts"] for r in rows) or 1
+    return {"pts": pts, "pos": pos, "eff": pts / pos, "hca": hca,
+            "share": {"1Q": sum(r["q1"] for r in rows) / full,
+                      "1H": sum(r["q1"] + r["q2"] for r in rows) / full,
+                      "2H": sum(r["q3"] + r["q4"] + r["ot"] for r in rows) / full},
+            "margin_sd": statistics.pstdev([r["pts"] - r["opp_pts"] for r in home]) if len(home) > 5 else 14.0}
+
+
+def predict_game(H, A, lg, rest_h=3, rest_a=3):
+    """H, A = each team's prior rows (any order). Returns projected home/away points or None."""
+    H, A = [r for r in H if _poss(r)], [r for r in A if _poss(r)]
+    if lg is None or len(H) < MODEL_MIN_GAMES or len(A) < MODEL_MIN_GAMES:
+        return None
+    pace = _shrunk([_poss(r) for r in H], lg["pos"]) * _shrunk([_poss(r) for r in A], lg["pos"]) / lg["pos"]
+    off = lambda X: _shrunk([r["pts"] / _poss(r) for r in X], lg["eff"])
+    dfn = lambda X: _shrunk([r["opp_pts"] / _poss(r) for r in X], lg["eff"])
+    ph = pace * off(H) * dfn(A) / lg["eff"] + lg["hca"] - (B2B_PENALTY if rest_h == 1 else 0)
+    pa = pace * off(A) * dfn(H) / lg["eff"] - lg["hca"] - (B2B_PENALTY if rest_a == 1 else 0)
+    return ph, pa
+
+
+def _rest_days(rows, date):
+    prior = [r["date"] for r in rows if r["date"] < date]
+    if not prior:
+        return 3
+    return (datetime.date.fromisoformat(date) - datetime.date.fromisoformat(max(prior))).days
+
+
+def _win_prob(margin, sd):
+    """P(home wins) from projected margin, normal error with the model's own walk-forward sd."""
+    import math
+    return round(0.5 * (1 + math.erf(margin / (sd * math.sqrt(2)))), 3)
+
+
+def walk_forward_accuracy(team_log):
+    """Predict every stored game from prior games only and score it. This is SIGNAL grading itself:
+    model vs the old own-median line vs league average vs (when stored) the book's closing number."""
+    games = []
+    for rows in team_log.values():
+        if len(rows) == 2:
+            h, a = (rows[0], rows[1]) if rows[0]["home"] else (rows[1], rows[0])
+            games.append((h["date"], h, a))
+    games.sort(key=lambda g: g[0])
+    hist, seen = {}, []
+    err = {k: {"total": [], "margin": [], "team_pts": []} for k in ("signal_model", "own_median", "league_avg", "book_close")}
+    winner = {"signal_model": [], "book_close": []}
+    vs_book = {"total_closer": [], "margin_closer": [], "ou_side": [], "ats_side": []}
+    resid = []
+    for date, h, a in games:
+        H, A = hist.get(h["team"], []), hist.get(a["team"], [])
+        lg = league_context(seen)
+        p = predict_game(H, A, lg, _rest_days(H, date), _rest_days(A, date))
+        if p:
+            ph, pa = p
+            at, am = h["pts"] + a["pts"], h["pts"] - a["pts"]
+            def put(k, xh, xa):
+                err[k]["total"].append(abs(xh + xa - at)); err[k]["margin"].append(abs(xh - xa - am))
+                err[k]["team_pts"] += [abs(xh - h["pts"]), abs(xa - a["pts"])]
+            put("signal_model", ph, pa)
+            put("own_median", statistics.median(r["pts"] for r in H[-20:]), statistics.median(r["pts"] for r in A[-20:]))
+            put("league_avg", lg["pts"] + lg["hca"], lg["pts"] - lg["hca"])
+            winner["signal_model"].append((ph - pa > 0) == (am > 0))
+            resid.append(ph - pa - am)
+            if "line_total" in h and "line_spread" in h:
+                bt, bm = h["line_total"], -h["line_spread"]          # book's implied total and home margin
+                err["book_close"]["total"].append(abs(bt - at)); err["book_close"]["margin"].append(abs(bm - am))
+                err["book_close"]["team_pts"] += [abs((bt + bm) / 2 - h["pts"]), abs((bt - bm) / 2 - a["pts"])]
+                winner["book_close"].append((bm > 0) == (am > 0))
+                vs_book["total_closer"].append(abs(ph + pa - at) < abs(bt - at))
+                vs_book["margin_closer"].append(abs(ph - pa - am) < abs(bm - am))
+                if at != bt and abs(ph + pa - bt) >= 3:               # model disagrees with the total by 3+
+                    vs_book["ou_side"].append((ph + pa > bt) == (at > bt))
+                if am != bm and abs(ph - pa - bm) >= 3:               # model disagrees with the spread by 3+
+                    vs_book["ats_side"].append((ph - pa > bm) == (am > bm))
+        hist.setdefault(h["team"], []).append(h); hist.setdefault(a["team"], []).append(a); seen += [h, a]
+    m = lambda v: round(statistics.fmean(v), 2) if v else None
+    pc = lambda v: round(100 * statistics.fmean(v), 1) if v else None
+    out = {"generated": STAMP, "games_scored": len(err["signal_model"]["total"]),
+           "method": f"pace x efficiency, ratings shrunk {SHRINK_K} games toward league avg, home court from data, "
+                     f"-{B2B_PENALTY} on back-to-backs; every game predicted from prior games only",
+           "mae": {k: {s: m(v) for s, v in d.items()} for k, d in err.items()},
+           "winner_pct": {k: pc(v) for k, v in winner.items()},
+           "margin_sd": round(statistics.pstdev(resid), 1) if len(resid) > 10 else 14.0,
+           "vs_book": {"games_with_lines": len(vs_book["total_closer"]),
+                       "model_closer_on_total_pct": pc(vs_book["total_closer"]),
+                       "model_closer_on_margin_pct": pc(vs_book["margin_closer"]),
+                       "ou_record_when_3pt_disagreement": [sum(vs_book["ou_side"]), len(vs_book["ou_side"]) - sum(vs_book["ou_side"])],
+                       "ats_record_when_3pt_disagreement": [sum(vs_book["ats_side"]), len(vs_book["ats_side"]) - sum(vs_book["ats_side"])]}}
+    return out
+
+
+def project_slate(team_log, games, day, acc):
+    """Projection for each of today's games, with the posted line and the gap to it when one exists."""
+    by_team, allrows = {}, []
+    for rows in team_log.values():
+        for r in rows:
+            by_team.setdefault(r["team"], []).append(r); allrows.append(r)
+    lg = league_context(allrows)
+    sd = (acc or {}).get("margin_sd") or 14.0
+    out = []
+    for g in games:
+        H, A = by_team.get(g["home"], []), by_team.get(g["away"], [])
+        d = day.isoformat()
+        p = predict_game(H, A, lg, _rest_days(H, d), _rest_days(A, d))
+        rec = {"home": g["home"], "away": g["away"], "book": g.get("odds") or {}}
+        if not p:
+            rec["ok"], rec["why"] = False, f"need {MODEL_MIN_GAMES}+ games for both teams"
+        else:
+            ph, pa = p
+            rec.update({"ok": True, "home_pts": round(ph, 1), "away_pts": round(pa, 1), "total": round(ph + pa, 1),
+                        "home_margin": round(ph - pa, 1), "home_win_prob": _win_prob(ph - pa, sd),
+                        "segments": {k: round((ph + pa) * v, 1) for k, v in lg["share"].items()},
+                        "home_b2b": _rest_days(H, d) == 1, "away_b2b": _rest_days(A, d) == 1})
+            bk = rec["book"]
+            if "total" in bk:
+                rec["total_vs_book"] = round(ph + pa - bk["total"], 1)
+            if "home_spread" in bk:
+                rec["margin_vs_book"] = round(ph - pa + bk["home_spread"], 1)   # + = model likes home vs the spread
+        out.append(rec)
+    return out
 
 
 # ---------------------------------------------------------------- report
@@ -870,8 +1038,18 @@ def main():
         print("ingested", n, "new games;", len(player_log), "total")
     if a.backfill_lines:
         backfill_lines(team_log)
-    if not a.rates_only and not a.no_lines:
-        capture_today_lines(datetime.date.today())
+    today = datetime.date.today()
+    games = [] if (a.rates_only or a.no_lines) else slate(today)
+    if games:
+        capture_today_lines(today, games)
+    acc = walk_forward_accuracy(team_log)
+    save(os.path.join(DATA, "accuracy.json"), acc)
+    if games:
+        save(os.path.join(DATA, "projections.json"),
+             {"generated": STAMP, "date": today.isoformat(), "margin_sd": acc["margin_sd"],
+              "games": project_slate(team_log, games, today, acc)})
+    print("accuracy:", acc["games_scored"], "games scored; model MAE", acc["mae"]["signal_model"],
+          "| old own-median", acc["mae"]["own_median"], "| book", acc["mae"]["book_close"])
     players, teams = compute(team_log, player_log)
     days = load(os.path.join(DATA, "ingested_days.json"), [])
     save(RATES_JSON, {"generated": STAMP, "through": days[-1] if days else None,

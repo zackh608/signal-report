@@ -91,6 +91,7 @@ tr:hover td{background:rgba(27,36,46,.5)}
   <p class="lede">Pulled live from ESPN's scoreboard for today (ET). Games priced outside 25–75% pregame are flagged <span class="pill trap">BLOWOUT RISK</span>: role-player minutes and second-half totals in those games are unreliable. Players with no game today are hidden here; injuries and rest are <b>not</b> in this data — check the injury report before trusting any row.</p>
   <div class="panel">
     <div id="today-games" class="recs" style="margin-bottom:10px">loading today's games…</div>
+    <div id="acc-panel" class="recs" style="margin-bottom:10px"></div>
     <div class="controls">
       <input id="d-search" placeholder="Search player or team…" style="min-width:220px">
       <select id="d-market"></select>
@@ -146,7 +147,7 @@ tr:hover td{background:rgba(27,36,46,.5)}
 <script>
 var BASE = 'https://raw.githubusercontent.com/zackh608/signal-report/main/data/nba/';
 var MARKETS = ['PTS','REB','AST','3PM','PRA','PR','PA','RA','STL','BLK','S+B'];
-var HR = null, TS = null, sortKey = 'score', sortDir = -1;
+var HR = null, TS = null, PROJ = null, ACC = null, sortKey = 'score', sortDir = -1;
 var TODAY = {date:null, games:[], teams:{}, lopsided:{}, error:null};
 var ESPN = 'https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard?dates=';
 
@@ -186,6 +187,8 @@ async function load(){
     var [hr, ts] = await Promise.all([fetch(BASE+'nba_hit_rates.json'+bust,{cache:'no-store'}).then(r=>{if(!r.ok)throw new Error('hit_rates '+r.status);return r.json();}),
                                       fetch(BASE+'nba_team_stats.json'+bust,{cache:'no-store'}).then(r=>{if(!r.ok)throw new Error('team_stats '+r.status);return r.json();})]);
     HR=hr; TS=ts;
+    var opt=u=>fetch(BASE+u+bust,{cache:'no-store'}).then(r=>r.ok?r.json():null).catch(()=>null);
+    [PROJ, ACC] = await Promise.all([opt('projections.json'), opt('accuracy.json')]);
     var gen = new Date(hr.generated), age = (Date.now()-gen)/36e5;
     st.innerHTML = 'games through <b>'+(hr.through||'?')+'</b><br>generated '+gen.toLocaleString()+' · <b class="'+(age>36?'stale':'')+'">'+(age>36?'STALE ':'')+Math.round(age)+'h ago</b>';
     renderPlayers(); renderTeams(); renderCard(); renderToday();
@@ -219,7 +222,7 @@ function playerRows(x){
 }
 var PCOLS=[['player','Player',r=>r.p.player],['team','Team',r=>r.p.team],['min','Min L5',r=>r.p.min_l5],['line','Line',r=>r.b.line],
   ['side','Side',r=>r.side],['l5','L5',r=>r.b.n_l5?(r.side==='under'?r.b.n_l5-r.b.over_l5:r.b.over_l5)/r.b.n_l5:-1],['l10','L10',r=>r.r10],['l20','L20',r=>r.r20],
-  ['season','Season',r=>r.b.n_season?r.b.over_season/r.b.n_season:-1],['streak','Streak',r=>r.b.streak||''],['avg','Avg L10',r=>r.b.avg_l10],['cushion','Cushion',r=>r.b.cushion],['score','Score',r=>r.score],['src','Line src',r=>r.b.line_source]];
+  ['season','Season',r=>r.b.n_season?r.b.over_season/r.b.n_season:-1],['streak','Streak',r=>r.b.streak||''],['proj','Proj',r=>r.b.proj??-1],['avg','Avg L10',r=>r.b.avg_l10],['cushion','Cushion',r=>r.b.cushion],['score','Score',r=>r.score],['src','Line src',r=>r.b.line_source]];
 function renderPlayers(x){
   x=x||'p'; if(!HR) return;
   var rows=playerRows(x), key=PCOLS.find(c=>c[0]===sortKey)||PCOLS[12], T='#'+x+'-table';
@@ -232,10 +235,10 @@ function renderPlayers(x){
     return '<tr><td><b>'+r.p.player+'</b>'+(x==='d'&&TODAY.lopsided[r.p.team]?' <span class="pill trap">BLOWOUT RISK</span>':'')+'</td><td class="mono">'+r.p.team+(x==='d'?' <span class="neutral">'+opp+'</span>':'')+'</td><td class="mono">'+r.p.min_l5+'</td><td class="mono"><b>'+b.line+'</b> '+mk+'</td>'+
     '<td>'+(s==='none'?'<span class="neutral">split</span>':'<span class="'+s+'">'+s.toUpperCase()+'</span>')+'</td>'+
     '<td>'+fmtRate(b.over_l5||0,b.n_l5||0,s==='none'?'over':s)+'</td><td>'+fmtRate(b.over_l10,b.n_l10,s==='none'?'over':s)+'</td><td>'+fmtRate(b.over_l20||0,b.n_l20||0,s==='none'?'over':s)+'</td>'+
-    '<td>'+fmtRate(b.over_season||0,b.n_season||0,s==='none'?'over':s)+'</td><td class="mono">'+(b.streak||'–')+'</td><td class="mono">'+b.avg_l10+'</td>'+
+    '<td>'+fmtRate(b.over_season||0,b.n_season||0,s==='none'?'over':s)+'</td><td class="mono">'+(b.streak||'–')+'</td><td class="mono"><b>'+(b.proj??'–')+'</b>'+(b.proj_sd!=null?' <span class="neutral">±'+b.proj_sd+'</span>':'')+(b.proj_edge!=null?' <span class="'+(b.proj_edge>0?'over':'under')+'">('+(b.proj_edge>0?'+':'')+b.proj_edge+' vs book)</span>':'')+'</td><td class="mono">'+b.avg_l10+'</td>'+
     '<td class="mono '+((b.cushion||0)>0?'over':(b.cushion||0)<0?'under':'')+'">'+((b.cushion||0)>0?'+':'')+b.cushion+'</td><td class="mono">'+(r.score?r.score.toFixed(3):'–')+'</td>'+
     '<td><span class="pill '+(b.line_source==='signal-median'?'':'book')+'">'+b.line_source+'</span>'+(b.trap_flag?' <span class="pill trap">'+b.trap_flag+'</span>':'')+'</td></tr>';}).join('')
-    : '<tr><td colspan="14" class="empty">'+(x==='d'&&!TODAY.games.length?(TODAY.error?'Could not reach ESPN ('+TODAY.error+').':'No NBA games today.'):'Nothing matches these filters.')+'</td></tr>';
+    : '<tr><td colspan="15" class="empty">'+(x==='d'&&!TODAY.games.length?(TODAY.error?'Could not reach ESPN ('+TODAY.error+').':'No NBA games today.'):'Nothing matches these filters.')+'</td></tr>';
 }
 
 /* ---------------- today ---------------- */
@@ -251,18 +254,38 @@ function renderToday(){
   if(TS) renderMatchups();
 }
 function segTot(t,k,w){ var s=t&&t.scoring&&t.scoring[w]&&t.scoring[w][k]; return s&&s.pts!=null?s:null; }
+function accLine(){
+  if(!ACC||!ACC.mae) return '';
+  var m=ACC.mae.signal_model, o=ACC.mae.own_median, b=ACC.mae.book_close, v=ACC.vs_book||{};
+  return '<b>How accurate is this?</b> Every one of '+ACC.games_scored+' games predicted from prior games only: SIGNAL model misses the total by <b>'+m.total+'</b> and the margin by <b>'+m.margin+'</b> on average, and picks the winner <b>'+ACC.winner_pct.signal_model+'%</b>. '+
+    'The old median line missed by '+o.total+' / '+o.margin+'. '+
+    (b&&b.total!=null ? 'The book\'s closing number missed by <b>'+b.total+'</b> / <b>'+b.margin+'</b> ('+v.games_with_lines+' games) — when SIGNAL disagreed with the book by 3+ it went <b>'+v.ou_record_when_3pt_disagreement.join('-')+'</b> on totals and <b>'+v.ats_record_when_3pt_disagreement.join('-')+'</b> against the spread.'
+      : '<span class="neutral">Book closing lines not backfilled yet — run “GET BOOK LINES (run once)” to see SIGNAL vs the book.</span>')+
+    ' <span class="neutral">A projection within ~'+Math.round(m.margin)+' points of a line is not an edge.</span>';
+}
 function renderMatchups(){
+  document.getElementById('acc-panel').innerHTML=accLine();
   var byAb={}; (TS.teams||[]).forEach(t=>byAb[t.team]=t);
+  var pj={}; ((PROJ&&PROJ.games)||[]).forEach(g=>pj[g.home]=g);
+  var fresh = PROJ && PROJ.date===(TODAY.date||'').replace(/(\d{4})(\d{2})(\d{2})/,'$1-$2-$3');
   document.getElementById('d-matchups').innerHTML=TODAY.games.map(function(g){
     var A=byAb[g.away.abbr], H=byAb[g.home.abbr]; if(!A||!H) return '';
+    var P=fresh?pj[g.home.abbr]:null, bk=(P&&P.book)||{};
+    var sgn=x=>(x>0?'+':'')+x;
+    var model = P&&P.ok ?
+      '<div class="recs" style="font-size:14px"><b>SIGNAL projection:</b> '+g.away.abbr+' <b>'+P.away_pts+'</b> – '+g.home.abbr+' <b>'+P.home_pts+'</b> · total <b>'+P.total+'</b> · '+g.home.abbr+' by <b>'+sgn(P.home_margin)+'</b> · '+g.home.abbr+' wins <b>'+Math.round(100*P.home_win_prob)+'%</b>'+
+        ((P.home_b2b||P.away_b2b)?' · <span class="pill trap">'+(P.home_b2b?g.home.abbr:g.away.abbr)+' on a back-to-back</span>':'')+'<br>'+
+        (bk.total!=null?'Book ('+bk.book+'): total <b>'+bk.total+'</b> → model '+sgn(P.total_vs_book)+(Math.abs(P.total_vs_book)>=3?' <span class="'+(P.total_vs_book>0?'over':'under')+'">leans '+(P.total_vs_book>0?'OVER':'UNDER')+'</span>':' <span class="neutral">no lean</span>'):'<span class="neutral">no posted total captured yet</span>')+
+        (bk.home_spread!=null?' · spread '+g.home.abbr+' <b>'+sgn(bk.home_spread)+'</b> → model '+sgn(P.margin_vs_book)+(Math.abs(P.margin_vs_book)>=3?' <span class="over">leans '+(P.margin_vs_book>0?g.home.abbr:g.away.abbr)+'</span>':' <span class="neutral">no lean</span>'):'')+
+        ' <span class="neutral">· leans are logged and graded on the accuracy line above, not recommendations</span>'+'<br><span class="neutral">Segments (league share of the total): 1Q '+P.segments['1Q']+' · 1H '+P.segments['1H']+' · 2H '+P.segments['2H']+'</span></div>'
+      : '<div class="recs neutral">'+(P&&!P.ok?('No projection: '+P.why):'Projection file is from another day — it refreshes when the tracker runs.')+'</div>';
     var rows=['1Q','1H','2H','FULL'].map(function(k){
       var a10=segTot(A,k,'last10'), h10=segTot(H,k,'last10'), as=segTot(A,k,'season'), hs=segTot(H,k,'season');
-      var proj = (as&&hs)? ((as.pts+hs.opp)/2 + (hs.pts+as.opp)/2) : null;
-      return '<tr><td><b>'+k+'</b></td><td class="mono">'+(as?as.pts+'-'+as.opp:'–')+'</td><td class="mono">'+(a10?a10.pts+'-'+a10.opp:'–')+'</td><td class="mono">'+(hs?hs.pts+'-'+hs.opp:'–')+'</td><td class="mono">'+(h10?h10.pts+'-'+h10.opp:'–')+'</td><td class="mono"><b>'+(proj!=null?proj.toFixed(1):'–')+'</b></td><td class="mono">'+mk(H,k==='FULL'?'GAME_TOTAL':k+'_TOTAL')+'</td></tr>';}).join('');
-    return '<div class="team"><h3>'+g.away.name+' <small>'+g.away.record+'</small> @ '+g.home.name+' <small>'+g.home.record+'</small>'+(g.lopsided?' <span class="pill trap">BLOWOUT RISK</span>':'')+'</h3>'+
-      '<div class="recs">'+g.away.abbr+' L10 <b>'+wl(A.records.last10)+'</b> · away <b>'+wl(A.records.away)+'</b> · pace '+(A.four_factors.offense.pace||'–')+' &nbsp;|&nbsp; '+g.home.abbr+' L10 <b>'+wl(H.records.last10)+'</b> · home <b>'+wl(H.records.home)+'</b> · pace '+(H.four_factors.offense.pace||'–')+'</div>'+
-      '<div class="tablewrap"><table><thead><tr><th>Seg</th><th>'+g.away.abbr+' season</th><th>'+g.away.abbr+' L10</th><th>'+g.home.abbr+' season</th><th>'+g.home.abbr+' L10</th><th>Matchup avg total</th><th>'+g.home.abbr+' line · O%</th></tr></thead><tbody>'+rows+'</tbody></table></div>'+
-      '<div class="recs neutral">Matchup avg = mean of (away scored + home allowed) and (home scored + away allowed), season. Backtest MAE: 1Q 6.9 · 1H 9.6 · 2H 11.9 · FULL 14.7 — an edge under those is noise.</div></div>';}).join('') || '';
+      return '<tr><td><b>'+k+'</b></td><td class="mono">'+(as?as.pts+'-'+as.opp:'–')+'</td><td class="mono">'+(a10?a10.pts+'-'+a10.opp:'–')+'</td><td class="mono">'+(hs?hs.pts+'-'+hs.opp:'–')+'</td><td class="mono">'+(h10?h10.pts+'-'+h10.opp:'–')+'</td></tr>';}).join('');
+    var bkrec=function(t){var b=t.book||{}, o=b.GAME_TOTAL, c=b.COVER; return (o?'O/U vs book <b>'+o.over_season+'-'+(o.n_season-o.over_season-o.push_season)+'</b>':'')+(c?' · ATS <b>'+c.cover_season+'-'+(c.n_season-c.cover_season-c.push_season)+'</b> (avg '+sgn(c.avg_margin)+')':'');};
+    return '<div class="team"><h3>'+g.away.name+' <small>'+g.away.record+'</small> @ '+g.home.name+' <small>'+g.home.record+'</small>'+(g.lopsided?' <span class="pill trap">BLOWOUT RISK</span>':'')+'</h3>'+model+
+      '<div class="recs">'+g.away.abbr+' L10 <b>'+wl(A.records.last10)+'</b> · away <b>'+wl(A.records.away)+'</b> · pace '+(A.four_factors.offense.pace||'–')+(bkrec(A)?' · '+bkrec(A):'')+' &nbsp;|&nbsp; '+g.home.abbr+' L10 <b>'+wl(H.records.last10)+'</b> · home <b>'+wl(H.records.home)+'</b> · pace '+(H.four_factors.offense.pace||'–')+(bkrec(H)?' · '+bkrec(H):'')+'</div>'+
+      '<div class="tablewrap"><table><thead><tr><th>Seg</th><th>'+g.away.abbr+' season (for-against)</th><th>'+g.away.abbr+' L10</th><th>'+g.home.abbr+' season</th><th>'+g.home.abbr+' L10</th></tr></thead><tbody>'+rows+'</tbody></table></div></div>';}).join('') || '';
 }
 
 /* ---------------- teams ---------------- */
