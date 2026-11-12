@@ -80,6 +80,7 @@ tr:hover td{background:rgba(27,36,46,.5)}
 </div></div>
 <div class="tabbar"><div class="tabbar-inner">
   <button class="tab active" data-tab="today">TODAY</button>
+  <button class="tab" data-tab="covers">COVERS</button>
   <button class="tab" data-tab="players">PLAYERS</button>
   <button class="tab" data-tab="teams">TEAMS</button>
   <button class="tab" data-tab="card">PAPER CARD</button>
@@ -113,6 +114,15 @@ tr:hover td{background:rgba(27,36,46,.5)}
     <div class="tablewrap"><table id="d-table"><thead></thead><tbody></tbody></table></div>
   </div>
   <div class="team-grid" id="d-matchups"></div>
+</section>
+
+<section id="tab-covers" style="display:none">
+  <h2>Who covers — every team against the closing spread and total</h2>
+  <p class="lede">Each game is graded against that game's own closing line. ATS = against the spread (covered-failed-push). “Avg” is how many points a team beats its spread by on average. Teams playing today are marked. A hot ATS record is the market being slow on a team, and the market catches up: check the league-wide lines under the table before leaning on any one record.</p>
+  <div class="panel">
+    <div id="c-league" class="recs" style="margin-bottom:10px"></div>
+    <div class="tablewrap"><table id="c-table"><thead></thead><tbody></tbody></table></div>
+  </div>
 </section>
 
 <section id="tab-players" style="display:none">
@@ -202,7 +212,7 @@ async function load(){
     GRIDX={}; ((GR&&GR.players)||[]).forEach(p=>GRIDX[p.player+'|'+p.team]=p); fillGrader();
     var gen = new Date(hr.generated), age = (Date.now()-gen)/36e5;
     st.innerHTML = 'games through <b>'+(hr.through||'?')+'</b><br>generated '+gen.toLocaleString()+' · <b class="'+(age>36?'stale':'')+'">'+(age>36?'STALE ':'')+Math.round(age)+'h ago</b>';
-    renderPlayers(); renderTeams(); renderCard(); renderToday();
+    renderPlayers(); renderTeams(); renderCard(); renderToday(); renderCovers();
   }catch(e){
     st.innerHTML='<b class="bad">no data</b> — '+e.message+'<br>run the tracker / check the repo';
     document.getElementById('p-table').querySelector('tbody').innerHTML='<tr><td colspan="12" class="empty">No tracker data yet. Once <span class="mono">data/nba/nba_hit_rates.json</span> exists in the repo this page fills itself.</td></tr>';
@@ -335,7 +345,7 @@ function renderToday(){
     var wp=g.home.wp!=null?' <span class="neutral">'+Math.round(100*g.away.wp)+'% / '+Math.round(100*g.home.wp)+'%</span>':'';
     return '<span style="display:inline-block;margin:3px 10px 3px 0">'+g.away.abbr+' @ <b>'+g.home.abbr+'</b> '+(g.state==='pre'?t:'<span class="mono">'+(g.away.score||0)+'-'+(g.home.score||0)+' '+g.status+'</span>')+wp+(g.lopsided?' <span class="pill trap">BLOWOUT RISK</span>':'')+'</span>';}).join('');
   if(HR) renderPlayers('d');
-  if(TS) renderMatchups();
+  if(TS) { renderMatchups(); renderCovers(); }
 }
 function segTot(t,k,w){ var s=t&&t.scoring&&t.scoring[w]&&t.scoring[w][k]; return s&&s.pts!=null?s:null; }
 function accLine(){
@@ -370,6 +380,34 @@ function renderMatchups(){
     return '<div class="team"><h3>'+g.away.name+' <small>'+g.away.record+'</small> @ '+g.home.name+' <small>'+g.home.record+'</small>'+(g.lopsided?' <span class="pill trap">BLOWOUT RISK</span>':'')+'</h3>'+model+cardContext(g,P)+
       '<div class="recs">'+g.away.abbr+' L10 <b>'+wl(A.records.last10)+'</b> · away <b>'+wl(A.records.away)+'</b> · pace '+(A.four_factors.offense.pace||'–')+(bkrec(A)?' · '+bkrec(A):'')+' &nbsp;|&nbsp; '+g.home.abbr+' L10 <b>'+wl(H.records.last10)+'</b> · home <b>'+wl(H.records.home)+'</b> · pace '+(H.four_factors.offense.pace||'–')+(bkrec(H)?' · '+bkrec(H):'')+'</div>'+
       '<div class="tablewrap"><table><thead><tr><th>Seg</th><th>'+g.away.abbr+' season (for-against)</th><th>'+g.away.abbr+' L10</th><th>'+g.home.abbr+' season</th><th>'+g.home.abbr+' L10</th></tr></thead><tbody>'+rows+'</tbody></table></div>'+edgeBlock(g,g.away.abbr,g.home.abbr)+edgeBlock(g,g.home.abbr,g.away.abbr)+'</div>';}).join('') || '';
+}
+
+/* ---------------- covers ---------------- */
+var cSort='pct', cDir=-1;
+function renderCovers(){
+  var T=(TS.teams||[]).filter(t=>t.book&&t.book.COVER&&t.book.COVER.home);
+  var el=document.querySelector('#c-table tbody'), hd=document.querySelector('#c-table thead');
+  if(!T.length){ hd.innerHTML=''; el.innerHTML='<tr><td class="empty">No closing spreads stored yet — run the tracker (it back-fills them from ESPN).</td></tr>'; return; }
+  var f=x=>x.w+'-'+x.l+(x.p?'-'+x.p:''), pc=x=>(x.w+x.l)?x.w/(x.w+x.l):-1, sg=x=>x==null?'–':(x>0?'+':'')+x;
+  var cls=x=>{var p=pc(x); return (x.w+x.l)>=4?(p>=.65?'over':(p<=.35?'under':'')):'';};
+  var rows=T.map(function(t){var c=t.book.COVER,o=t.book.TOTALS||{over:0,under:0,avg_vs_line:null,l5:{over:0,under:0}}; var all={w:c.cover_season,l:c.n_season-c.cover_season-c.push_season,p:c.push_season};
+    return {t:t,c:c,o:o,all:all,pct:pc(all),avg:c.avg_margin,su:c.su.w/(c.su.w+c.su.l),l5:c.cover_l5/Math.max(1,c.n_l5),home:pc(c.home),away:pc(c.away),fav:pc(c.favorite),dog:pc(c.underdog),ou:o.over/Math.max(1,o.over+o.under),tot:o.avg_vs_line,team:t.team};});
+  rows.sort((a,b)=>typeof a[cSort]==='string'?cDir*a[cSort].localeCompare(b[cSort]):cDir*((a[cSort]??-9)-(b[cSort]??-9))||b.avg-a.avg);
+  var H=[['team','Team'],['pct','ATS'],['avg','Avg cover'],['su','Straight up'],['l5','ATS L5'],['home','Home ATS'],['away','Away ATS'],['fav','As favourite'],['dog','As underdog'],['ou','Over-Under'],['tot','Total vs line']];
+  hd.innerHTML='<tr>'+H.map(h=>'<th data-k="'+h[0]+'" class="'+(h[0]===cSort?'sorted':'')+'">'+h[1]+(h[0]===cSort?'<span class="arr">'+(cDir<0?'▼':'▲')+'</span>':'')+'</th>').join('')+'<th>Streak</th><th>Last 10 (newest first)</th></tr>';
+  hd.querySelectorAll('th[data-k]').forEach(th=>th.onclick=()=>{var k=th.dataset.k; if(cSort===k) cDir*=-1; else {cSort=k; cDir=k==='team'?1:-1;} renderCovers();});
+  el.innerHTML=rows.map(function(r){var c=r.c,o=r.o,g=TODAY.teams[r.team], opp=g?(g.home.abbr===r.team?'vs '+g.away.abbr:'@ '+g.home.abbr):'';
+    return '<tr><td><b>'+r.t.team_name+'</b>'+(g?' <span class="pill book">TODAY '+opp+'</span>':'')+'</td>'+
+      '<td class="mono '+cls(r.all)+'"><b>'+f(r.all)+'</b> <span class="neutral">'+Math.round(100*r.pct)+'%</span></td><td class="mono '+(c.avg_margin>0?'over':'under')+'">'+sg(c.avg_margin)+'</td>'+
+      '<td class="mono">'+c.su.w+'-'+c.su.l+'</td><td class="mono">'+c.cover_l5+'/'+c.n_l5+'</td>'+
+      '<td class="mono '+cls(c.home)+'">'+f(c.home)+'</td><td class="mono '+cls(c.away)+'">'+f(c.away)+'</td><td class="mono '+cls(c.favorite)+'">'+f(c.favorite)+'</td><td class="mono '+cls(c.underdog)+'">'+f(c.underdog)+'</td>'+
+      '<td class="mono">'+o.over+'-'+o.under+'</td><td class="mono '+(o.avg_vs_line>0?'over':'under')+'">'+sg(o.avg_vs_line)+'</td><td class="mono">'+c.streak+'</td>'+
+      '<td class="mono" style="letter-spacing:2px">'+c.results.map(x=>'<span class="'+(x.cover>0?'over':(x.cover<0?'under':'neutral'))+'" title="'+x.date+' '+(x.home?'vs ':'@ ')+x.opp+' · spread '+sg(x.spread)+' · margin '+sg(x.margin)+'">'+(x.cover>0?'W':(x.cover<0?'L':'P'))+'</span>').join('')+'</td></tr>';}).join('');
+  var A={}; ['home','away','favorite','underdog','big_favorite','big_underdog','after_win','after_loss'].forEach(k=>{A[k]={w:0,l:0}; T.forEach(t=>{A[k].w+=t.book.COVER[k].w; A[k].l+=t.book.COVER[k].l;});});
+  var ov=0,un=0; T.forEach(t=>{ if(t.book.TOTALS){ov+=t.book.TOTALS.over; un+=t.book.TOTALS.under;} });
+  var L=(k,n)=>n+' <b>'+A[k].w+'-'+A[k].l+'</b> ('+Math.round(100*A[k].w/Math.max(1,A[k].w+A[k].l))+'%)';
+  document.getElementById('c-league').innerHTML='<b>League-wide against the spread:</b> '+[L('home','home teams'),L('away','road teams'),L('favorite','favourites'),L('underdog','underdogs'),L('big_favorite','favourites of 7+'),L('big_underdog','underdogs of 7+'),L('after_win','after a win'),L('after_loss','after a loss')].join(' · ')+
+    ' · totals: <b>'+ov/2+' overs, '+un/2+' unders</b>. <span class="neutral">52.4% is break-even at standard −110 pricing.</span>';
 }
 
 /* ---------------- teams ---------------- */
@@ -420,7 +458,7 @@ function renderCard(){
 }
 
 /* ---------------- wiring ---------------- */
-document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x===t));['today','players','teams','card'].forEach(k=>document.getElementById('tab-'+k).style.display=t.dataset.tab===k?'':'none');});
+document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x===t));['today','covers','players','teams','card'].forEach(k=>document.getElementById('tab-'+k).style.display=t.dataset.tab===k?'':'none');});
 document.getElementById('p-market').innerHTML=MARKETS.map(m=>'<option>'+m+'</option>').join('');
 document.getElementById('d-market').innerHTML=MARKETS.map(m=>'<option>'+m+'</option>').join('');
 document.getElementById('g-market').innerHTML=MARKETS.map(m=>'<option>'+m+'</option>').join('');

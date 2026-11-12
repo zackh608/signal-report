@@ -101,6 +101,13 @@ the last-5 average was the worst predictor. `proj_edge` appears only when a real
 
 Nothing here knows about injuries. A player who is out still gets a grade.
 
+## 4f. Spread and total tally (since 2026-11-12)
+
+`nba_team_stats.json` -> each team's `book.COVER`: against-the-spread record vs each game's closing spread, with
+home/away, favourite/underdog, 7+ point favourite/underdog, after-a-win/after-a-loss splits, last 5/10/20, current
+streak, average cover margin and the last 10 results. `book.TOTALS` is the same for over/under. The site's
+**COVERS** tab shows every team, sortable, with league-wide lines underneath.
+
 ## 4e. Context tracking (since 2026-11-12) - all free, all from ESPN
 
 | Tracked | Where | Used in grades? |

@@ -539,17 +539,56 @@ def book_block(rows, val_fn, line_key):
 
 
 def cover_block(rows):
-    """Against-the-spread record from stored closing spreads (rows newest first)."""
-    g = [r["pts"] - r["opp_pts"] + r["line_spread"] for r in rows if "line_spread" in r]
-    if not g:
+    """Against-the-spread record from stored closing spreads (rows newest first), with the splits that matter:
+    home/away, as favourite/underdog, after a win/loss, last 5/10/20, current streak and average cover margin."""
+    L = [r for r in rows if "line_spread" in r]
+    if not L:
         return None
+    res = lambda r: r["pts"] - r["opp_pts"] + r["line_spread"]          # > 0 covered, 0 push
+    def rec(X):
+        g = [res(r) for r in X]
+        return {"w": sum(x > 0 for x in g), "l": sum(x < 0 for x in g), "p": sum(x == 0 for x in g),
+                "avg_margin": round(statistics.fmean(g), 1) if g else None}
+    g = [res(r) for r in L]
+    streak, kind = 0, None
+    for x in g:
+        k = "W" if x > 0 else "L" if x < 0 else "P"
+        if kind is None:
+            kind = k
+        if k != kind:
+            break
+        streak += 1
     out = {"n_season": len(g), "cover_season": sum(x > 0 for x in g), "push_season": sum(x == 0 for x in g),
-           "avg_margin": round(statistics.fmean(g), 1), "last_spread": [r["line_spread"] for r in rows if "line_spread" in r][0],
-           "line_source": next(r.get("line_book", "book") for r in rows if "line_spread" in r)}
+           "avg_margin": round(statistics.fmean(g), 1), "last_spread": L[0]["line_spread"],
+           "line_source": L[0].get("line_book", "book"), "streak": f"{kind}{streak}",
+           "home": rec([r for r in L if r["home"]]), "away": rec([r for r in L if not r["home"]]),
+           "favorite": rec([r for r in L if r["line_spread"] < 0]), "underdog": rec([r for r in L if r["line_spread"] > 0]),
+           "big_favorite": rec([r for r in L if r["line_spread"] <= -7]), "big_underdog": rec([r for r in L if r["line_spread"] >= 7]),
+           "after_win": rec([r for i, r in enumerate(L) if i + 1 < len(L) and L[i + 1]["win"]]),
+           "after_loss": rec([r for i, r in enumerate(L) if i + 1 < len(L) and not L[i + 1]["win"]]),
+           "su": {"w": sum(r["win"] for r in L), "l": sum(not r["win"] for r in L)},
+           "results": [{"date": r["date"], "opp": r["opp"], "home": r["home"], "spread": r["line_spread"],
+                        "margin": r["pts"] - r["opp_pts"], "cover": round(res(r), 1)} for r in L[:10]]}
     for w in WINDOWS:
-        s = g[:w]
-        out[f"cover_l{w}"] = sum(x > 0 for x in s)
-        out[f"n_l{w}"] = len(s)
+        s_ = g[:w]
+        out[f"cover_l{w}"] = sum(x > 0 for x in s_)
+        out[f"n_l{w}"] = len(s_)
+    return out
+
+
+def total_block(rows):
+    """Over/under record against each game's closing total, with home/away splits and average miss."""
+    L = [r for r in rows if "line_total" in r]
+    if not L:
+        return None
+    d = lambda r: r["pts"] + r["opp_pts"] - r["line_total"]
+    def rec(X):
+        g = [d(r) for r in X]
+        return {"over": sum(x > 0 for x in g), "under": sum(x < 0 for x in g), "push": sum(x == 0 for x in g),
+                "avg_vs_line": round(statistics.fmean(g), 1) if g else None}
+    out = rec(L)
+    out.update({"n": len(L), "home": rec([r for r in L if r["home"]]), "away": rec([r for r in L if not r["home"]]),
+                "l5": rec(L[:5]), "l10": rec(L[:10]), "last_total": L[0]["line_total"]})
     return out
 
 
@@ -857,6 +896,7 @@ def team_profile(abbr, rows):
     rec["book"] = {
         "GAME_TOTAL": book_block(rows, lambda r: r["pts"] + r["opp_pts"], "line_total"),
         "COVER": cover_block(rows),
+        "TOTALS": total_block(rows),
     }
     # back-compat fields used by the report
     rec["ppg"], rec["opp_ppg"] = rec["scoring"]["season"]["FULL"]["pts"], rec["scoring"]["season"]["FULL"]["opp"]
