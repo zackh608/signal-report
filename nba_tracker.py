@@ -157,6 +157,54 @@ def team_row(gid, day, sides, ha, opp):
     return row
 
 
+def parse_odds(g):
+    """Closing/pregame market from an ESPN summary or scoreboard competition: {total, home_spread, book} or {}.
+    home_spread is the number added to the HOME score (favorite negative). ESPN exposes this as `pickcenter`
+    on the summary and `odds` on the scoreboard; both carry overUnder + spread + provider. Free, no key."""
+    cands = (g.get("pickcenter") or []) + ((g.get("header", {}).get("competitions") or [{}])[0].get("odds") or []) \
+            + (g.get("odds") or [])
+    for o in cands:
+        try:
+            total = o.get("overUnder")
+            spread = o.get("spread")
+            if total in (None, "") and spread in (None, ""):
+                continue
+            out = {"book": (o.get("provider") or {}).get("name") or "ESPN"}
+            if total not in (None, ""):
+                out["total"] = float(total)
+            if spread not in (None, ""):
+                sp = float(spread)
+                # ESPN's `spread` is from the favorite's side; `details` says who ("BOS -5.5"). Normalise to home.
+                home_fav = (o.get("homeTeamOdds") or {}).get("favorite")
+                away_fav = (o.get("awayTeamOdds") or {}).get("favorite")
+                if home_fav is None and away_fav is None:
+                    det = str(o.get("details", ""))
+                    home_abbr = (o.get("_home_abbr") or "")
+                    home_fav = det.startswith(home_abbr + " ") if home_abbr else None
+                if home_fav is False or away_fav is True:
+                    out["home_spread"] = abs(sp)
+                elif home_fav is True or away_fav is False:
+                    out["home_spread"] = -abs(sp)
+                else:
+                    out["home_spread"] = sp   # already home-relative (scoreboard style)
+            return out
+        except (TypeError, ValueError):
+            continue
+    return {}
+
+
+def attach_odds(team_rows, odds):
+    """Write book fields onto both team rows: line_total, line_spread (added to THIS team's score), line_book."""
+    if not odds:
+        return
+    for r in team_rows:
+        if "total" in odds:
+            r["line_total"] = odds["total"]
+        if "home_spread" in odds:
+            r["line_spread"] = odds["home_spread"] if r["home"] else -odds["home_spread"]
+        r["line_book"] = odds.get("book", "ESPN")
+
+
 def parse_game(event_id, day):
     """Return (team_rows, player_rows) for one final game."""
     g = get(f"{ESPN}/summary?event={event_id}")
@@ -197,6 +245,7 @@ def parse_game(event_id, day):
         return [], []
     team_rows = [team_row(event_id, day, sides, ha, opp)
                  for ha, opp in (("home", "away"), ("away", "home"))]
+    attach_odds(team_rows, parse_odds(g))
 
     player_rows = []
     for tb in g.get("boxscore", {}).get("players", []):
@@ -354,6 +403,90 @@ def ingest(start, end):
 
 
 # ---------------------------------------------------------------- lines
+def backfill_lines(team_log):
+    """Fetch the closing total/spread for every stored ESPN game that lacks one. One summary call per game;
+    NBA.com-sourced games (non-numeric ids) are skipped. Returns the number of games patched."""
+    n = 0
+    for gid, rows in team_log.items():
+        if not str(gid).isdigit() or any("line_total" in r or "line_spread" in r for r in rows):
+            continue
+        try:
+            odds = parse_odds(get(f"{ESPN}/summary?event={gid}"))
+        except Exception as e:
+            print(f"lines: {gid} failed ({e})")
+            continue
+        if odds:
+            attach_odds(rows, odds)
+            n += 1
+        time.sleep(0.2)
+    if n:
+        save(TEAM_LOG, team_log)
+    print(f"lines: backfilled {n} games")
+    return n
+
+
+def capture_today_lines(day):
+    """Write today's pregame total/spread from the ESPN scoreboard to data/nba/lines/team-<day>.csv
+    (home,segment,line,book) so Jarvis and the site grade against a posted number, not a median."""
+    try:
+        sb = get(f"{ESPN}/scoreboard?dates={day:%Y%m%d}")
+    except Exception as e:
+        print(f"lines: scoreboard for {day} failed ({e})")
+        return 0
+    out = []
+    for ev in sb.get("events", []):
+        comp = (ev.get("competitions") or [{}])[0]
+        home = next((c["team"]["abbreviation"] for c in comp.get("competitors", []) if c.get("homeAway") == "home"), None)
+        if not home:
+            continue
+        for o in comp.get("odds") or []:
+            o["_home_abbr"] = home
+        odds = parse_odds({"odds": comp.get("odds") or []})
+        if "total" in odds:
+            out.append((home, "FULL", odds["total"], odds["book"]))
+        if "home_spread" in odds:
+            out.append((home, "SPREAD", odds["home_spread"], odds["book"]))
+    if out:
+        os.makedirs(LINES_DIR, exist_ok=True)
+        with open(os.path.join(LINES_DIR, f"team-{day.isoformat()}.csv"), "w", newline="", encoding="utf-8") as f:
+            w = csv.writer(f)
+            w.writerow(["home", "segment", "line", "book"])
+            w.writerows(out)
+    print(f"lines: captured {len(out)} posted numbers for {day}")
+    return len(out)
+
+
+def book_block(rows, val_fn, line_key):
+    """Hit rate against each game's OWN posted line (rows newest first). None if no lines stored."""
+    g = [(val_fn(r), r[line_key]) for r in rows if line_key in r]
+    if not g:
+        return None
+    out = {"n_season": len(g), "over_season": sum(v > l for v, l in g), "push_season": sum(v == l for v, l in g)}
+    for w in WINDOWS:
+        s = g[:w]
+        out[f"over_l{w}"] = sum(v > l for v, l in s)
+        out[f"n_l{w}"] = len(s)
+    out["avg_margin"] = round(statistics.fmean(v - l for v, l in g), 1)   # + = beats the number on average
+    out["last_line"] = g[0][1]
+    out["line_source"] = rows[0].get("line_book", "book") if rows else "book"
+    return out
+
+
+def cover_block(rows):
+    """Against-the-spread record from stored closing spreads (rows newest first)."""
+    g = [r["pts"] - r["opp_pts"] + r["line_spread"] for r in rows if "line_spread" in r]
+    if not g:
+        return None
+    out = {"n_season": len(g), "cover_season": sum(x > 0 for x in g), "push_season": sum(x == 0 for x in g),
+           "avg_margin": round(statistics.fmean(g), 1), "last_spread": [r["line_spread"] for r in rows if "line_spread" in r][0],
+           "line_source": next(r.get("line_book", "book") for r in rows if "line_spread" in r)}
+    for w in WINDOWS:
+        s = g[:w]
+        out[f"cover_l{w}"] = sum(x > 0 for x in s)
+        out[f"n_l{w}"] = len(s)
+    return out
+
+
 def load_lines():
     """{(player_lower, MARKET): (line, book, date)} from the newest CSV per player/market."""
     out = {}
@@ -560,9 +693,15 @@ def team_profile(abbr, rows):
                          "offense_l10": four_factors(rows[:10]), "defense_l10": four_factors(rows[:10], "opp_")},
         "box_per_game": {k: avg(rows, lambda r, k=k: r.get(k, 0)) for k in TEAM_BOX_KEYS if any(k in r for r in rows)},
         "opp_box_per_game": {k: avg(rows, lambda r, k=k: r.get("opp_" + k, 0)) for k in TEAM_BOX_KEYS if any("opp_" + k in r for r in rows)},
-        "game_log": [{k: r[k] for k in ("date", "opp", "home", "pts", "opp_pts", "q1", "q2", "q3", "q4", "ot",
-                                        "oq1", "oq2", "oq3", "oq4", "oot", "win")} for r in rows],
+        "game_log": [{**{k: r[k] for k in ("date", "opp", "home", "pts", "opp_pts", "q1", "q2", "q3", "q4", "ot",
+                                           "oq1", "oq2", "oq3", "oq4", "oot", "win")},
+                      **{k: r[k] for k in ("line_total", "line_spread", "line_book") if k in r}} for r in rows],
         "markets": {},
+    }
+    # graded against the POSTED number for each game (closing total / spread) - the only hit rate that means anything
+    rec["book"] = {
+        "GAME_TOTAL": book_block(rows, lambda r: r["pts"] + r["opp_pts"], "line_total"),
+        "COVER": cover_block(rows),
     }
     # back-compat fields used by the report
     rec["ppg"], rec["opp_ppg"] = rec["scoring"]["season"]["FULL"]["pts"], rec["scoring"]["season"]["FULL"]["opp"]
@@ -712,6 +851,8 @@ def main():
     ap.add_argument("--rates-only", action="store_true")
     ap.add_argument("--rebuild", action="store_true", help="discard stored game logs and re-pull every date")
     ap.add_argument("--no-gist", action="store_true")
+    ap.add_argument("--backfill-lines", action="store_true", help="fetch closing total/spread for stored games missing them")
+    ap.add_argument("--no-lines", action="store_true", help="skip capturing today's posted lines")
     a = ap.parse_args()
     yesterday = datetime.date.today() - datetime.timedelta(days=1)
     start = datetime.date.fromisoformat(a.start) if a.start else SEASON_START
@@ -727,6 +868,10 @@ def main():
     else:
         team_log, player_log, n = ingest(start, end)
         print("ingested", n, "new games;", len(player_log), "total")
+    if a.backfill_lines:
+        backfill_lines(team_log)
+    if not a.rates_only and not a.no_lines:
+        capture_today_lines(datetime.date.today())
     players, teams = compute(team_log, player_log)
     days = load(os.path.join(DATA, "ingested_days.json"), [])
     save(RATES_JSON, {"generated": STAMP, "through": days[-1] if days else None,

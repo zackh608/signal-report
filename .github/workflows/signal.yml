@@ -35,16 +35,16 @@ jobs:
           GIST_ID: a7ebd591bd69d8a1bd777a60ab7ce089
         run: |
           if [ -n "${{ github.event.inputs.nba_from }}" ]; then
-            python nba_tracker.py --from "${{ github.event.inputs.nba_from }}"
+            python nba_tracker.py --from "${{ github.event.inputs.nba_from }}" --backfill-lines
           else
-            python nba_tracker.py
+            python nba_tracker.py --backfill-lines
           fi
 
       - name: Commit NBA data back to repo (keeps backfill state)
         run: |
           git config user.name "signal-bot"
           git config user.email "signal-bot@users.noreply.github.com"
-          git add data/nba nba_player_props.md
+          git add data/nba nba_player_props.md data/nba/lines
           git diff --cached --quiet && echo "no data changes" && exit 0
           git commit -m "nba: data through $(date -u +%F)"
           # the Desktop scheduled task may have pushed the same day's data; replay on top, keep our files

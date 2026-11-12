@@ -32,7 +32,23 @@ To also push the report to the gist locally, set `GIST_TOKEN` (a GitHub token wi
 GitHub → repo → **Actions** → **SIGNAL daily report** → **Run workflow**.
 Put a date in `nba_from` (e.g. `2026-10-20`) to force a backfill from that day; leave blank for normal.
 
-## 4. Add real sportsbook lines
+## 4. Posted lines (automatic since 2026-11-12)
+
+Every run now does two things with no key and no paid feed:
+
+* **Closing total + spread for every stored game** come from ESPN's game summary (`pickcenter`). `--backfill-lines`
+  patches any stored game that lacks them (one call per game, skips games already done, safe to pass every run).
+  Each team's `book` block in `nba_team_stats.json` is its over/under record and against-the-spread record
+  **graded against that game's actual number** — the only hit rate that means anything.
+* **Today's pregame total + spread** are read from the ESPN scoreboard and written to
+  `data/nba/lines/team-YYYY-MM-DD.csv` (`home,FULL|SPREAD,line,book`) so Jarvis and the site grade tonight
+  against a posted number instead of a median. `--no-lines` skips this.
+
+Player prop lines are still not captured automatically (ESPN does not publish them). Until they are, player
+hit rates are against the player's own median and **are not bettable** — the 2026-11-09/11 record (3-19) is what
+betting them looks like.
+
+## 4b. Add player prop lines by hand
 
 Create `data/nba/lines/YYYY-MM-DD.csv`:
 
