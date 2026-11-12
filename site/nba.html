@@ -88,10 +88,19 @@ tr:hover td{background:rgba(27,36,46,.5)}
 <div class="wrap">
 <section id="tab-today">
   <h2>Today's slate — only players and teams on the floor tonight</h2>
-  <p class="lede">Pulled live from ESPN's scoreboard for today (ET). Games priced outside 25–75% pregame are flagged <span class="pill trap">BLOWOUT RISK</span>: role-player minutes and second-half totals in those games are unreliable. Players with no game today are hidden here; injuries and rest are <b>not</b> in this data — check the injury report before trusting any row.</p>
+  <p class="lede">Pulled live from ESPN's scoreboard for today (ET). Games priced outside 25–75% pregame are flagged <span class="pill trap">BLOWOUT RISK</span>: role-player minutes and second-half totals in those games are unreliable. Players with no game today are hidden here; injuries and rest are <b>not</b> in this data — check the injury report before trusting any row. <b>Grade</b> = the chance a pick hits, from the player's own numbers, his minutes and how tonight's opponent defends that stat; a <b>*</b> means it was graded against SIGNAL's baseline because no book line is on file.</p>
   <div class="panel">
     <div id="today-games" class="recs" style="margin-bottom:10px">loading today's games…</div>
     <div id="acc-panel" class="recs" style="margin-bottom:10px"></div>
+    <div class="controls" style="border-top:1px solid var(--line);padding-top:10px">
+      <b style="font-family:var(--font-display);font-size:18px">GRADE A PICK</b>
+      <input id="g-player" list="g-players" placeholder="Player playing today…" style="min-width:220px"><datalist id="g-players"></datalist>
+      <select id="g-market"></select>
+      <select id="g-side"><option value="over">OVER</option><option value="under">UNDER</option></select>
+      <input id="g-line" type="number" step="0.5" placeholder="book line" style="width:96px">
+      <span id="g-out" class="mono"></span>
+    </div>
+    <div id="g-detail" class="recs" style="margin-bottom:10px"></div>
     <div class="controls">
       <input id="d-search" placeholder="Search player or team…" style="min-width:220px">
       <select id="d-market"></select>
@@ -146,8 +155,8 @@ tr:hover td{background:rgba(27,36,46,.5)}
 
 <script>
 var BASE = 'https://raw.githubusercontent.com/zackh608/signal-report/main/data/nba/';
-var MARKETS = ['PTS','REB','AST','3PM','PRA','PR','PA','RA','STL','BLK','S+B'];
-var HR = null, TS = null, PROJ = null, ACC = null, sortKey = 'score', sortDir = -1;
+var MARKETS = ['PTS','REB','AST','3PM','PRA','PR','PA','RA','STL','BLK','S+B','TOV','FGM','FGA','3PA','FTM','FTA','OREB','DREB','PF'];
+var HR = null, TS = null, PROJ = null, ACC = null, GR = null, GRIDX = {}, sortKey = 'score', sortDir = -1;
 var TODAY = {date:null, games:[], teams:{}, lopsided:{}, error:null};
 var ESPN = 'https://site.api.espn.com/apis/site/v2/sports/basketball/nba/scoreboard?dates=';
 
@@ -188,7 +197,8 @@ async function load(){
                                       fetch(BASE+'nba_team_stats.json'+bust,{cache:'no-store'}).then(r=>{if(!r.ok)throw new Error('team_stats '+r.status);return r.json();})]);
     HR=hr; TS=ts;
     var opt=u=>fetch(BASE+u+bust,{cache:'no-store'}).then(r=>r.ok?r.json():null).catch(()=>null);
-    [PROJ, ACC] = await Promise.all([opt('projections.json'), opt('accuracy.json')]);
+    [PROJ, ACC, GR] = await Promise.all([opt('projections.json'), opt('accuracy.json'), opt('grades.json')]);
+    GRIDX={}; ((GR&&GR.players)||[]).forEach(p=>GRIDX[p.player+'|'+p.team]=p); fillGrader();
     var gen = new Date(hr.generated), age = (Date.now()-gen)/36e5;
     st.innerHTML = 'games through <b>'+(hr.through||'?')+'</b><br>generated '+gen.toLocaleString()+' · <b class="'+(age>36?'stale':'')+'">'+(age>36?'STALE ':'')+Math.round(age)+'h ago</b>';
     renderPlayers(); renderTeams(); renderCard(); renderToday();
@@ -222,7 +232,7 @@ function playerRows(x){
 }
 var PCOLS=[['player','Player',r=>r.p.player],['team','Team',r=>r.p.team],['min','Min L5',r=>r.p.min_l5],['line','Line',r=>r.b.line],
   ['side','Side',r=>r.side],['l5','L5',r=>r.b.n_l5?(r.side==='under'?r.b.n_l5-r.b.over_l5:r.b.over_l5)/r.b.n_l5:-1],['l10','L10',r=>r.r10],['l20','L20',r=>r.r20],
-  ['season','Season',r=>r.b.n_season?r.b.over_season/r.b.n_season:-1],['streak','Streak',r=>r.b.streak||''],['proj','Proj',r=>r.b.proj??-1],['avg','Avg L10',r=>r.b.avg_l10],['cushion','Cushion',r=>r.b.cushion],['score','Score',r=>r.score],['src','Line src',r=>r.b.line_source]];
+  ['season','Season',r=>r.b.n_season?r.b.over_season/r.b.n_season:-1],['streak','Streak',r=>r.b.streak||''],['grade','Grade',r=>{var g=gradeOf(r.p,document.getElementById('d-market').value);return g?g.p:-1;}],['proj','Proj',r=>r.b.proj??-1],['avg','Avg L10',r=>r.b.avg_l10],['cushion','Cushion',r=>r.b.cushion],['score','Score',r=>r.score],['src','Line src',r=>r.b.line_source]];
 function renderPlayers(x){
   x=x||'p'; if(!HR) return;
   var rows=playerRows(x), key=PCOLS.find(c=>c[0]===sortKey)||PCOLS[12], T='#'+x+'-table';
@@ -235,10 +245,61 @@ function renderPlayers(x){
     return '<tr><td><b>'+r.p.player+'</b>'+(x==='d'&&TODAY.lopsided[r.p.team]?' <span class="pill trap">BLOWOUT RISK</span>':'')+'</td><td class="mono">'+r.p.team+(x==='d'?' <span class="neutral">'+opp+'</span>':'')+'</td><td class="mono">'+r.p.min_l5+'</td><td class="mono"><b>'+b.line+'</b> '+mk+'</td>'+
     '<td>'+(s==='none'?'<span class="neutral">split</span>':'<span class="'+s+'">'+s.toUpperCase()+'</span>')+'</td>'+
     '<td>'+fmtRate(b.over_l5||0,b.n_l5||0,s==='none'?'over':s)+'</td><td>'+fmtRate(b.over_l10,b.n_l10,s==='none'?'over':s)+'</td><td>'+fmtRate(b.over_l20||0,b.n_l20||0,s==='none'?'over':s)+'</td>'+
-    '<td>'+fmtRate(b.over_season||0,b.n_season||0,s==='none'?'over':s)+'</td><td class="mono">'+(b.streak||'–')+'</td><td class="mono"><b>'+(b.proj??'–')+'</b>'+(b.proj_sd!=null?' <span class="neutral">±'+b.proj_sd+'</span>':'')+(b.proj_edge!=null?' <span class="'+(b.proj_edge>0?'over':'under')+'">('+(b.proj_edge>0?'+':'')+b.proj_edge+' vs book)</span>':'')+'</td><td class="mono">'+b.avg_l10+'</td>'+
+    '<td>'+fmtRate(b.over_season||0,b.n_season||0,s==='none'?'over':s)+'</td><td class="mono">'+(b.streak||'–')+'</td><td class="mono">'+gradeCell(r.p,mk)+'</td><td class="mono"><b>'+(b.proj??'–')+'</b>'+(b.proj_sd!=null?' <span class="neutral">±'+b.proj_sd+'</span>':'')+(b.proj_edge!=null?' <span class="'+(b.proj_edge>0?'over':'under')+'">('+(b.proj_edge>0?'+':'')+b.proj_edge+' vs book)</span>':'')+'</td><td class="mono">'+b.avg_l10+'</td>'+
     '<td class="mono '+((b.cushion||0)>0?'over':(b.cushion||0)<0?'under':'')+'">'+((b.cushion||0)>0?'+':'')+b.cushion+'</td><td class="mono">'+(r.score?r.score.toFixed(3):'–')+'</td>'+
     '<td><span class="pill '+(b.line_source==='signal-median'?'':'book')+'">'+b.line_source+'</span>'+(b.trap_flag?' <span class="pill trap">'+b.trap_flag+'</span>':'')+'</td></tr>';}).join('')
-    : '<tr><td colspan="15" class="empty">'+(x==='d'&&!TODAY.games.length?(TODAY.error?'Could not reach ESPN ('+TODAY.error+').':'No NBA games today.'):'Nothing matches these filters.')+'</td></tr>';
+    : '<tr><td colspan="16" class="empty">'+(x==='d'&&!TODAY.games.length?(TODAY.error?'Could not reach ESPN ('+TODAY.error+').':'No NBA games today.'):'Nothing matches these filters.')+'</td></tr>';
+}
+
+
+/* ---------------- grading ---------------- */
+function ncdf(x){ var t=1/(1+0.3275911*Math.abs(x)/Math.SQRT2), y=1-(((((1.061405429*t-1.453152027)*t)+1.421413741)*t-0.284496736)*t+0.254829592)*t*Math.exp(-x*x/2); return x>=0?(1+y)/2:(1-y)/2; }
+function gcls(g){ return g[0]==='A'?'over':(g==='B'?'':(g==='F'||g==='D'?'under':'neutral')); }
+function gradeOf(p,mk){ var e=GRIDX[p.player+'|'+p.team]; return e&&e.markets[mk]||null; }
+function gradeCell(p,mk){ var g=gradeOf(p,mk); if(!g) return '<span class="neutral">–</span>';
+  return '<b class="'+gcls(g.grade)+'" title="'+g.notes.join('; ').replace(/"/g,'')+'">'+g.grade+(g.book?'':'*')+'</b> <span class="neutral">'+g.side[0].toUpperCase()+' '+Math.round(100*g.p)+'%</span>'; }
+function gradeLine(e,m,line,side){   /* same maths as nba_tracker.grade_pick */
+  var c=GR.calibration_c, b=GR.calibration_bias||0, po=Math.min(.99,Math.max(.01,.5+c*((1-ncdf((line-m.adj)/m.sd))-.5)+b));
+  var p=side==='over'?po:1-po, bands=GR.bands, i=bands.findIndex(x=>p>=x[1]), notes=[];
+  if(e.n<8){ i=Math.max(i,2); notes.push('only '+e.n+' games — capped at B'); }
+  if(e.min_cv>.25){ i=Math.min(i+1,bands.length-1); notes.push('minutes unstable — one grade down'); }
+  if(e.lopsided&&e.min_l5<32){ i=Math.min(i+1,bands.length-1); notes.push('blowout risk for a sub-32-minute player — one grade down'); }
+  return {p:p, grade:bands[i][0], notes:notes};
+}
+function fillGrader(){
+  if(!GR) { document.getElementById('g-out').innerHTML='<span class="neutral">grades appear after the tracker runs for today</span>'; return; }
+  document.getElementById('g-players').innerHTML=GR.players.map(p=>'<option value="'+p.player+'">'+p.team+' '+(p.home?'vs ':'@ ')+p.opp+'</option>').join('');
+  if(!document.getElementById('g-market').options.length) document.getElementById('g-market').innerHTML=MARKETS.map(m=>'<option>'+m+'</option>').join('');
+  runGrader();
+}
+function runGrader(){
+  var out=document.getElementById('g-out'), det=document.getElementById('g-detail'); det.innerHTML='';
+  if(!GR){ return; }
+  var name=document.getElementById('g-player').value.trim().toLowerCase(), mk=document.getElementById('g-market').value,
+      side=document.getElementById('g-side').value, e=GR.players.find(p=>p.player.toLowerCase()===name);
+  if(!name){ out.innerHTML='<span class="neutral">pick a player, a stat and the book\'s line</span>'; return; }
+  if(!e){ out.innerHTML='<span class="under">not on today\'s slate (or under 5 games of 15+ min)</span>'; return; }
+  var m=e.markets[mk]; if(!m){ out.innerHTML='<span class="neutral">no '+mk+' data for him yet</span>'; return; }
+  var li=document.getElementById('g-line'), line=parseFloat(li.value); if(isNaN(line)){ line=m.line; li.placeholder=m.line+' (baseline)'; }
+  var g=gradeLine(e,m,line,side);
+  out.innerHTML='<b class="'+gcls(g.grade)+'" style="font-size:22px">'+g.grade+'</b> &nbsp;'+side.toUpperCase()+' '+line+' '+mk+' hits <b>'+Math.round(100*g.p)+'%</b>';
+  det.innerHTML='<b>'+e.player+'</b> ('+e.team+(e.home?' vs ':' @ ')+e.opp+') — season average <b>'+m.base+'</b> '+mk+' over '+e.n+' games, typical swing ±'+m.sd+'. '+
+    (m.fx.length? 'Matchup: '+m.fx.map(f=>e.opp+' ranks #'+f[1]+' in '+f[0].toLowerCase()+' allowed ('+(f[2]>0?'+':'')+f[2]+'%)').join('; ')+' → adjusted projection <b>'+m.adj+'</b>. '
+               : 'No matchup signal for this stat has tested as real yet, so the projection stays at his average. ')+
+    'Minutes L5 '+e.min_l5+(e.lopsided?' · <span class="pill trap">BLOWOUT RISK</span>':'')+'. '+
+    (g.notes.length?'<span class="under">'+g.notes.join('; ')+'.</span> ':'')+
+    '<span class="neutral">Grade = chance the pick hits: A+ 70%+, A 65%, B 60%, C 55%, D 52%, F below. '+(isNaN(parseFloat(li.value))?'Using SIGNAL\'s baseline line — type the book\'s number for the real grade.':'')+'</span>';
+}
+function edgeBlock(g,off,dfn){
+  var E=(GR&&GR.date&&GR.games||[]).find(x=>x.home===g.home.abbr&&x.away===g.away.abbr); if(!E||!E.edges[off]) return '';
+  var rows=E.edges[off], row=function(e){
+    var who=e.players.length? e.players.slice(0,2).map(w=>w.player.split(' ').slice(-1)[0]+' '+w.market+' <b>'+w.adj+'</b> <b class="'+gcls(w.grade)+'">'+w.grade+(w.book?'':'*')+'</b>').join(' · ') : '<span class="neutral">team stat</span>';
+    return '<tr><td><b>'+e.label+'</b>'+(e.market?(e.proven?' <span class="pill book">tested</span>':' <span class="pill">untested</span>'):'')+'</td><td class="mono">'+e.off+' <span class="neutral">#'+e.off_rank+'</span></td><td class="mono">'+e.def+' <span class="neutral">#'+e.def_rank+'</span></td><td class="mono '+(e.score>0?'over':'under')+'">'+(e.score>0?'+':'')+e.score+'</td><td style="white-space:normal;min-width:190px">'+who+'</td></tr>';};
+  var head='<thead><tr><th>Stat</th><th>'+off+' gets</th><th>'+dfn+' allows</th><th>Mismatch</th><th>Who it points to</th></tr></thead>';
+  return '<div class="recs" style="margin-top:8px"><b>'+off+' offense vs '+dfn+' defense</b> — biggest strength-meets-weakness first</div>'+
+    '<div class="tablewrap"><table>'+head+'<tbody>'+rows.slice(0,6).map(row).join('')+'</tbody></table></div>'+
+    '<div class="recs neutral" style="margin-top:4px">Where '+dfn+' shuts it down:</div><div class="tablewrap"><table><tbody>'+rows.slice(-3).reverse().map(row).join('')+'</tbody></table></div>'+
+    '<details style="margin-top:6px"><summary class="neutral" style="cursor:pointer">Every stat ('+rows.length+')</summary><div class="tablewrap"><table>'+head+'<tbody>'+rows.map(row).join('')+'</tbody></table></div></details>';
 }
 
 /* ---------------- today ---------------- */
@@ -275,9 +336,9 @@ function renderMatchups(){
     var model = P&&P.ok ?
       '<div class="recs" style="font-size:14px"><b>SIGNAL projection:</b> '+g.away.abbr+' <b>'+P.away_pts+'</b> – '+g.home.abbr+' <b>'+P.home_pts+'</b> · total <b>'+P.total+'</b> · '+g.home.abbr+' by <b>'+sgn(P.home_margin)+'</b> · '+g.home.abbr+' wins <b>'+Math.round(100*P.home_win_prob)+'%</b>'+
         ((P.home_b2b||P.away_b2b)?' · <span class="pill trap">'+(P.home_b2b?g.home.abbr:g.away.abbr)+' on a back-to-back</span>':'')+'<br>'+
-        (bk.total!=null?'Book ('+bk.book+'): total <b>'+bk.total+'</b> → model '+sgn(P.total_vs_book)+(Math.abs(P.total_vs_book)>=3?' <span class="'+(P.total_vs_book>0?'over':'under')+'">leans '+(P.total_vs_book>0?'OVER':'UNDER')+'</span>':' <span class="neutral">no lean</span>'):'<span class="neutral">no posted total captured yet</span>')+
-        (bk.home_spread!=null?' · spread '+g.home.abbr+' <b>'+sgn(bk.home_spread)+'</b> → model '+sgn(P.margin_vs_book)+(Math.abs(P.margin_vs_book)>=3?' <span class="over">leans '+(P.margin_vs_book>0?g.home.abbr:g.away.abbr)+'</span>':' <span class="neutral">no lean</span>'):'')+
-        ' <span class="neutral">· leans are logged and graded on the accuracy line above, not recommendations</span>'+'<br><span class="neutral">Segments (league share of the total): 1Q '+P.segments['1Q']+' · 1H '+P.segments['1H']+' · 2H '+P.segments['2H']+'</span></div>'
+        (bk.total!=null?'Book ('+bk.book+'): total <b>'+bk.total+'</b> → model '+sgn(P.total_vs_book)+(P.total_pick?' → <b class="'+gcls(P.total_pick.grade)+'">'+P.total_pick.grade+'</b> '+P.total_pick.side.toUpperCase()+' '+Math.round(100*P.total_pick.p)+'%':''):'<span class="neutral">no posted total captured yet</span>')+
+        (bk.home_spread!=null?' · spread '+g.home.abbr+' <b>'+sgn(bk.home_spread)+'</b> → model '+sgn(P.margin_vs_book)+(P.spread_pick?' → <b class="'+gcls(P.spread_pick.grade)+'">'+P.spread_pick.grade+'</b> '+P.spread_pick.side+' '+Math.round(100*P.spread_pick.p)+'%':''):'')+
+        ' <span class="neutral">· team grades count only half of any disagreement with the book until SIGNAL proves it beats the closing line</span>'+'<br><span class="neutral">Segments (league share of the total): 1Q '+P.segments['1Q']+' · 1H '+P.segments['1H']+' · 2H '+P.segments['2H']+'</span></div>'
       : '<div class="recs neutral">'+(P&&!P.ok?('No projection: '+P.why):'Projection file is from another day — it refreshes when the tracker runs.')+'</div>';
     var rows=['1Q','1H','2H','FULL'].map(function(k){
       var a10=segTot(A,k,'last10'), h10=segTot(H,k,'last10'), as=segTot(A,k,'season'), hs=segTot(H,k,'season');
@@ -285,7 +346,7 @@ function renderMatchups(){
     var bkrec=function(t){var b=t.book||{}, o=b.GAME_TOTAL, c=b.COVER; return (o?'O/U vs book <b>'+o.over_season+'-'+(o.n_season-o.over_season-o.push_season)+'</b>':'')+(c?' · ATS <b>'+c.cover_season+'-'+(c.n_season-c.cover_season-c.push_season)+'</b> (avg '+sgn(c.avg_margin)+')':'');};
     return '<div class="team"><h3>'+g.away.name+' <small>'+g.away.record+'</small> @ '+g.home.name+' <small>'+g.home.record+'</small>'+(g.lopsided?' <span class="pill trap">BLOWOUT RISK</span>':'')+'</h3>'+model+
       '<div class="recs">'+g.away.abbr+' L10 <b>'+wl(A.records.last10)+'</b> · away <b>'+wl(A.records.away)+'</b> · pace '+(A.four_factors.offense.pace||'–')+(bkrec(A)?' · '+bkrec(A):'')+' &nbsp;|&nbsp; '+g.home.abbr+' L10 <b>'+wl(H.records.last10)+'</b> · home <b>'+wl(H.records.home)+'</b> · pace '+(H.four_factors.offense.pace||'–')+(bkrec(H)?' · '+bkrec(H):'')+'</div>'+
-      '<div class="tablewrap"><table><thead><tr><th>Seg</th><th>'+g.away.abbr+' season (for-against)</th><th>'+g.away.abbr+' L10</th><th>'+g.home.abbr+' season</th><th>'+g.home.abbr+' L10</th></tr></thead><tbody>'+rows+'</tbody></table></div></div>';}).join('') || '';
+      '<div class="tablewrap"><table><thead><tr><th>Seg</th><th>'+g.away.abbr+' season (for-against)</th><th>'+g.away.abbr+' L10</th><th>'+g.home.abbr+' season</th><th>'+g.home.abbr+' L10</th></tr></thead><tbody>'+rows+'</tbody></table></div>'+edgeBlock(g,g.away.abbr,g.home.abbr)+edgeBlock(g,g.home.abbr,g.away.abbr)+'</div>';}).join('') || '';
 }
 
 /* ---------------- teams ---------------- */
@@ -339,6 +400,8 @@ function renderCard(){
 document.querySelectorAll('.tab').forEach(t=>t.onclick=()=>{document.querySelectorAll('.tab').forEach(x=>x.classList.toggle('active',x===t));['today','players','teams','card'].forEach(k=>document.getElementById('tab-'+k).style.display=t.dataset.tab===k?'':'none');});
 document.getElementById('p-market').innerHTML=MARKETS.map(m=>'<option>'+m+'</option>').join('');
 document.getElementById('d-market').innerHTML=MARKETS.map(m=>'<option>'+m+'</option>').join('');
+document.getElementById('g-market').innerHTML=MARKETS.map(m=>'<option>'+m+'</option>').join('');
+['g-player','g-market','g-side','g-line'].forEach(id=>document.getElementById(id).addEventListener('input',runGrader));
 ['d-search','d-market','d-strong','d-book','d-noblow','d-min'].forEach(id=>document.getElementById(id).addEventListener('input',()=>HR&&renderPlayers('d')));
 ['p-search','p-market','p-strong','p-book','p-min'].forEach(id=>document.getElementById(id).addEventListener('input',()=>HR&&renderPlayers()));
 ['t-search','t-sort'].forEach(id=>document.getElementById(id).addEventListener('input',()=>TS&&renderTeams()));

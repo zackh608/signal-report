@@ -82,6 +82,25 @@ Players: each market now carries `proj` (season mean of 15+ minute games) and `p
 the season mean beat the L20 median, per-minute x minutes, opponent adjustment and every recency blend;
 the last-5 average was the worst predictor. `proj_edge` appears only when a real book line is on file.
 
+## 4d. Every stat, matchups and grades (since 2026-11-12)
+
+* **Every stat is stored.** Player rows keep attempts (FGA/3PA/FTA), plus-minus and any column ESPN adds;
+  team rows keep every statistic in the box score (unmapped ones under an `x_` name), for and against.
+  Games ingested before this date only have the old columns - run **REBUILD** once to re-pull them all
+  (it also stores the closing lines, so it replaces "GET BOOK LINES").
+* `nba_team_stats.json` -> each team's `stats`: every stat per game, **for and against, with league rank and z-score**.
+* `accuracy.json` -> `matchup_effects`: for every player stat, how much opposing players actually gained or lost
+  against weak vs strong defenses in that stat, measured walk-forward. A signal is `used` only if it has 150+
+  graded player-games and a positive effect; only half of the measured effect is applied, capped at 12%.
+  `calibration` is how over-confident the raw probabilities were; grades are corrected by it.
+* `grades.json` (today's slate) -> every player x market: season average, matchup-adjusted projection, the chance
+  the pick hits and a letter (A+ 70%+, A 65, B 60, C 55, D 52, F), with one-grade penalties for unstable minutes
+  and blowout risk and a cap at B under 8 games; and, per game, **every stat ranked strength-vs-weakness** with the
+  players it points to. A `*` on a grade means no book line was on file. The site's GRADE A PICK box re-grades
+  any player/stat against the line you type.
+
+Nothing here knows about injuries. A player who is out still gets a grade.
+
 ## 5. What lives where
 
 | File | What |

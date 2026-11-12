@@ -36,6 +36,9 @@ PLAYER_MARKETS = {        # market -> function(row) -> value
     "PRA": lambda r: r["pts"] + r["reb"] + r["ast"], "PR": lambda r: r["pts"] + r["reb"],
     "PA": lambda r: r["pts"] + r["ast"], "RA": lambda r: r["reb"] + r["ast"],
     "S+B": lambda r: r["stl"] + r["blk"],
+    "TOV": lambda r: r.get("tov"), "FGM": lambda r: r.get("fgm"), "FTM": lambda r: r.get("ftm"),
+    "OREB": lambda r: r.get("oreb"), "DREB": lambda r: r.get("dreb"), "PF": lambda r: r.get("pf"),
+    "FGA": lambda r: r.get("fga"), "3PA": lambda r: r.get("fg3a"), "FTA": lambda r: r.get("fta"),
 }
 def _seg(r, keys, opp=False):
     return sum(r[("o" if opp else "") + k] for k in keys)
@@ -122,6 +125,19 @@ def made(s):
     return num(str(s).split("-")[0])
 
 
+def att(s):
+    """ESPN gives '7-15' for FG/3PT/FT; return attempted."""
+    parts = str(s).split("-")
+    return num(parts[1]) if len(parts) > 1 else 0
+
+
+def snake(name):
+    out = ""
+    for ch in str(name):
+        out += ("_" + ch.lower()) if ch.isupper() else ch
+    return out.strip("_").replace("__", "_")
+
+
 def minutes(s):
     s = str(s or "0")
     if ":" in s:
@@ -149,7 +165,7 @@ def team_row(gid, day, sides, ha, opp):
            "q1": s["q"][0], "q2": s["q"][1], "q3": s["q"][2], "q4": s["q"][3], "ot": s["ot"],
            "oq1": o["q"][0], "oq2": o["q"][1], "oq3": o["q"][2], "oq4": o["q"][3], "oot": o["ot"],
            "win": s["pts"] > o["pts"]}
-    for k in TEAM_BOX_KEYS:
+    for k in set(s["box"]) | set(o["box"]):          # every stat either side has, not a fixed list
         if k in s["box"]:
             row[k] = s["box"][k]
         if k in o["box"]:
@@ -229,9 +245,21 @@ def parse_game(event_id, day):
             continue
         for st in tb.get("statistics", []):
             key = ESPN_TEAM_STATS.get(st.get("name"))
-            if not key:
-                continue
             dv = str(st.get("displayValue", "0"))
+            if not key:
+                # every other statistic ESPN publishes is kept under its own name ("x_" prefix), so nothing
+                # the box score offers is thrown away; percentages are recomputed from makes/attempts later
+                nm = snake(st.get("name") or "")
+                if nm and "pct" not in nm.lower() and "percent" not in nm.lower():
+                    if "-" in dv and all(x.strip().isdigit() for x in dv.split("-")[:2]):
+                        a_, b_ = dv.split("-")[:2]
+                        side["box"]["x_" + nm + "_made"], side["box"]["x_" + nm + "_att"] = num(a_), num(b_)
+                    else:
+                        try:
+                            side["box"]["x_" + nm] = float(dv.replace(",", ""))
+                        except ValueError:
+                            pass
+                continue
             if isinstance(key, tuple):
                 parts = dv.split("-")
                 side["box"][key[0]] = num(parts[0])
@@ -267,7 +295,19 @@ def parse_game(event_id, day):
                     "fg3m": made(v("3PT")), "fgm": made(v("FG")), "ftm": made(v("FT")),
                     "stl": num(v("STL")), "blk": num(v("BLK")), "tov": num(v("TO")),
                     "oreb": num(v("OREB")), "dreb": num(v("DREB")), "pf": num(v("PF")),
+                    "fga": att(v("FG")), "fg3a": att(v("3PT")), "fta": att(v("FT")),
                 }
+                if "+/-" in idx:
+                    try:
+                        row["plus_minus"] = float(str(v("+/-")).replace("+", ""))
+                    except ValueError:
+                        pass
+                for lab in labels:   # anything ESPN adds later is kept too
+                    if lab not in ("MIN", "PTS", "REB", "AST", "3PT", "FG", "FT", "STL", "BLK", "TO", "OREB", "DREB", "PF", "+/-"):
+                        try:
+                            row["x_" + snake(lab).lower()] = float(str(st[idx[lab]]).replace("+", ""))
+                        except (ValueError, IndexError):
+                            pass
                 player_rows.append(row)
     return team_rows, player_rows
 
@@ -309,6 +349,9 @@ def parse_nba_game(gid, day):
         q = [num(p.get("score")) for p in t.get("periods", [])]
         box = {NBA_TEAM_STATS[k]: num(v) for k, v in (t.get("statistics") or {}).items()
                if k in NBA_TEAM_STATS}
+        for k, v in (t.get("statistics") or {}).items():
+            if k not in NBA_TEAM_STATS and isinstance(v, (int, float)) and "ercentage" not in k:
+                box["x_" + snake(k)] = float(v)
         sides[ha] = {"abbr": t["teamTricode"],
                      "name": f"{t.get('teamCity','')} {t.get('teamName','')}".strip(),
                      "pts": num(t["score"]), "q": (q + [0, 0, 0, 0])[:4], "ot": sum(q[4:]), "box": box}
@@ -333,6 +376,8 @@ def parse_nba_game(gid, day):
                 "stl": num(st.get("steals")), "blk": num(st.get("blocks")),
                 "tov": num(st.get("turnovers")), "oreb": num(st.get("reboundsOffensive")),
                 "dreb": num(st.get("reboundsDefensive")), "pf": num(st.get("foulsPersonal")),
+                "fga": num(st.get("fieldGoalsAttempted")), "fg3a": num(st.get("threePointersAttempted")),
+                "fta": num(st.get("freeThrowsAttempted")), "plus_minus": num(st.get("plusMinusPoints")),
             })
     return team_rows, player_rows
 
@@ -568,9 +613,13 @@ def compute(team_log, player_log):
         rec = {"player_id": pid, "player": head["player"], "team": head["team"],
                "gp": len(rows), "eligible_gp": len(eligible),
                "min_l5": round(statistics.fmean(r["min"] for r in rows[:5]), 1),
+               "min_cv": round(statistics.pstdev([r["min"] for r in eligible[:10]]) /
+                               (statistics.fmean(r["min"] for r in eligible[:10]) or 1), 2),
                "markets": {}}
         for mk, fn in PLAYER_MARKETS.items():
-            vals = [fn(r) for r in eligible]
+            vals = [fn(r) for r in eligible if fn(r) is not None]
+            if len(vals) < 3:
+                continue   # stat not stored for these games (older rows lack attempts until a --rebuild)
             lk = lines.get((head["player"].lower(), mk))
             if lk:
                 line, src = lk[0], f"{lk[1]} ({lk[2]})"
@@ -603,6 +652,9 @@ def compute(team_log, player_log):
         for r in rows:
             by_team.setdefault(r["team"], []).append(r)
     teams = [team_profile(abbr, rows) for abbr, rows in by_team.items()]
+    tabs = league_z({t["team"]: team_stat_table(by_team[t["team"]]) for t in teams})
+    for t in teams:
+        t["stats"] = tabs[t["team"]]          # every stat, for and against, with league rank and z-score
     winners = {t["team"] for t in teams if t["gp"] and t["w"] / t["gp"] > .5}
     for t in teams:
         t["records"]["vs_winning_teams"] = record(by_team[t["team"]], lambda r: r["opp"] in winners)
@@ -667,6 +719,22 @@ def four_factors(rows, prefix=""):
     }
 
 
+_BASE_ROW_KEYS = {"game_id", "date", "team", "team_name", "opp", "home", "pts", "opp_pts", "q1", "q2", "q3", "q4", "ot",
+                  "oq1", "oq2", "oq3", "oq4", "oot", "win", "line_total", "line_spread", "line_book"}
+
+
+def all_box_keys(rows):
+    """Every box stat stored on any of these team rows (own side), in a stable order."""
+    seen = []
+    for k in TEAM_BOX_KEYS:
+        if any(k in r for r in rows):
+            seen.append(k)
+    extra = sorted({k for r in rows for k, v in r.items()
+                    if k not in _BASE_ROW_KEYS and not k.startswith("opp_") and k not in TEAM_BOX_KEYS
+                    and isinstance(v, (int, float)) and not isinstance(v, bool)})
+    return seen + extra
+
+
 def team_profile(abbr, rows):
     rows.sort(key=lambda r: r["date"], reverse=True)
     gp = len(rows)
@@ -705,8 +773,9 @@ def team_profile(abbr, rows):
         },
         "four_factors": {"offense": four_factors(rows), "defense": four_factors(rows, "opp_"),
                          "offense_l10": four_factors(rows[:10]), "defense_l10": four_factors(rows[:10], "opp_")},
-        "box_per_game": {k: avg(rows, lambda r, k=k: r.get(k, 0)) for k in TEAM_BOX_KEYS if any(k in r for r in rows)},
-        "opp_box_per_game": {k: avg(rows, lambda r, k=k: r.get("opp_" + k, 0)) for k in TEAM_BOX_KEYS if any("opp_" + k in r for r in rows)},
+        "box_per_game": {k: avg([r for r in rows if k in r], lambda r, k=k: r[k]) for k in all_box_keys(rows)},
+        "opp_box_per_game": {k: avg([r for r in rows if "opp_" + k in r], lambda r, k=k: r["opp_" + k])
+                             for k in all_box_keys(rows) if any("opp_" + k in r for r in rows)},
         "game_log": [{**{k: r[k] for k in ("date", "opp", "home", "pts", "opp_pts", "q1", "q2", "q3", "q4", "ot",
                                            "oq1", "oq2", "oq3", "oq4", "oot", "win")},
                       **{k: r[k] for k in ("line_total", "line_spread", "line_book") if k in r}} for r in rows],
@@ -743,6 +812,8 @@ SHRINK_K = 8            # pseudo-games of league-average mixed into every team r
 B2B_PENALTY = 1.5       # points off a team playing the second night of a back-to-back
 MODEL_MIN_GAMES = 3     # both teams need this many games or no projection is made
 SEG_SHARE = {"1Q": 0.25, "1H": 0.5, "2H": 0.5}   # replaced by league shares when computed
+BOOK_TRUST = 0.5        # when the model disagrees with a posted line, believe only this share of the gap: the
+                        # closing line is a better predictor than this model until accuracy.json says otherwise
 
 
 def _poss(r):
@@ -813,7 +884,7 @@ def walk_forward_accuracy(team_log):
     err = {k: {"total": [], "margin": [], "team_pts": []} for k in ("signal_model", "own_median", "league_avg", "book_close")}
     winner = {"signal_model": [], "book_close": []}
     vs_book = {"total_closer": [], "margin_closer": [], "ou_side": [], "ats_side": []}
-    resid = []
+    resid, resid_tot = [], []
     for date, h, a in games:
         H, A = hist.get(h["team"], []), hist.get(a["team"], [])
         lg = league_context(seen)
@@ -828,7 +899,7 @@ def walk_forward_accuracy(team_log):
             put("own_median", statistics.median(r["pts"] for r in H[-20:]), statistics.median(r["pts"] for r in A[-20:]))
             put("league_avg", lg["pts"] + lg["hca"], lg["pts"] - lg["hca"])
             winner["signal_model"].append((ph - pa > 0) == (am > 0))
-            resid.append(ph - pa - am)
+            resid.append(ph - pa - am); resid_tot.append(ph + pa - at)
             if "line_total" in h and "line_spread" in h:
                 bt, bm = h["line_total"], -h["line_spread"]          # book's implied total and home margin
                 err["book_close"]["total"].append(abs(bt - at)); err["book_close"]["margin"].append(abs(bm - am))
@@ -849,6 +920,7 @@ def walk_forward_accuracy(team_log):
            "mae": {k: {s: m(v) for s, v in d.items()} for k, d in err.items()},
            "winner_pct": {k: pc(v) for k, v in winner.items()},
            "margin_sd": round(statistics.pstdev(resid), 1) if len(resid) > 10 else 14.0,
+           "total_sd": round(statistics.pstdev(resid_tot), 1) if len(resid_tot) > 10 else 18.0,
            "vs_book": {"games_with_lines": len(vs_book["total_closer"]),
                        "model_closer_on_total_pct": pc(vs_book["total_closer"]),
                        "model_closer_on_margin_pct": pc(vs_book["margin_closer"]),
@@ -880,12 +952,281 @@ def project_slate(team_log, games, day, acc):
                         "segments": {k: round((ph + pa) * v, 1) for k, v in lg["share"].items()},
                         "home_b2b": _rest_days(H, d) == 1, "away_b2b": _rest_days(A, d) == 1})
             bk = rec["book"]
+            def _team_grade(gap, sd_, pos, neg):
+                pr = _norm_cdf(BOOK_TRUST * abs(gap) / sd_)
+                return {"side": pos if gap > 0 else neg, "p": round(pr, 3),
+                        "grade": next(g_ for g_, lo in GRADE_BANDS if pr >= lo)}
             if "total" in bk:
                 rec["total_vs_book"] = round(ph + pa - bk["total"], 1)
+                rec["total_pick"] = _team_grade(rec["total_vs_book"], (acc or {}).get("total_sd") or 18.0, "over", "under")
             if "home_spread" in bk:
                 rec["margin_vs_book"] = round(ph - pa + bk["home_spread"], 1)   # + = model likes home vs the spread
+                rec["spread_pick"] = _team_grade(rec["margin_vs_book"], sd, g["home"], g["away"])
         out.append(rec)
     return out
+
+
+# ---------------------------------------------------------------- matchup engine: every stat, strength vs weakness
+STAT_LABELS = {
+    "pts": "Points", "fgm": "FG made", "fga": "FG attempts", "fg_pct": "FG%", "fg3m": "3PT made", "fg3a": "3PT attempts",
+    "fg3_pct": "3PT%", "ftm": "FT made", "fta": "FT attempts", "ft_pct": "FT%", "efg_pct": "eFG%", "reb": "Rebounds",
+    "oreb": "Off. rebounds", "dreb": "Def. rebounds", "oreb_pct": "Off. rebound %", "ast": "Assists", "stl": "Steals",
+    "blk": "Blocks", "tov": "Turnovers", "tov_pct": "Turnover %", "pf": "Fouls", "pitp": "Paint points",
+    "fb": "Fast-break points", "pot": "Points off turnovers", "p2c": "2nd-chance points", "bench": "Bench points",
+    "lead_max": "Largest lead", "pace": "Pace (possessions)", "rating": "Points per 100 poss.", "ft_rate": "FT rate",
+    "fg3a_rate": "3PT attempt rate", "q1": "1st-quarter points", "q2": "2nd-quarter points", "q3": "3rd-quarter points",
+    "q4": "4th-quarter points", "h1": "1st-half points", "h2": "2nd-half points",
+}
+# team stat -> the player market it feeds (who benefits when an offense's strength meets a defense's weakness)
+STAT_TO_MARKET = {"pts": "PTS", "reb": "REB", "oreb": "OREB", "dreb": "DREB", "ast": "AST", "fg3m": "3PM", "fg3a": "3PA",
+                  "stl": "STL", "blk": "BLK", "tov": "TOV", "fgm": "FGM", "fga": "FGA", "ftm": "FTM", "fta": "FTA", "pf": "PF",
+                  "pitp": "PTS", "fb": "PTS", "pace": "PRA", "h1": "PTS", "q1": "PTS"}
+# player market -> the opponent's "allowed" stats that are tested as matchup signals for it. The weight of each
+# is NOT assumed: fit_matchups() measures it walk-forward every run, and a signal that tests negative gets zero.
+MATCHUP_METRICS = {
+    "PTS": ("pts", "pace", "pitp", "fta"), "REB": ("reb",), "OREB": ("oreb",), "DREB": ("dreb",), "AST": ("ast",),
+    "3PM": ("fg3a", "fg3_pct"), "3PA": ("fg3a",), "STL": ("stl",), "BLK": ("blk",), "TOV": ("tov",),
+    "FGM": ("fgm", "pace"), "FGA": ("fga", "pace"), "FTM": ("fta",), "FTA": ("fta",), "PF": ("pf",),
+    "PRA": ("pts", "pace"), "PR": ("pts", "pace", "reb"), "PA": ("pts", "pace", "ast"), "RA": ("reb", "ast"),
+    "S+B": ("stl",),
+}
+MATCHUP_SHRINK = 0.5     # apply half of the measured effect (three weeks of data over-states everything)
+MATCHUP_CAP = 0.12       # never move a projection more than 12% for matchup
+MATCHUP_MIN_N = 150      # a signal needs this many graded player-games before it is used at all
+GRADE_BANDS = (("A+", 0.70), ("A", 0.65), ("B", 0.60), ("C", 0.55), ("D", 0.52), ("F", 0.0))
+
+
+def team_stat_table(rows):
+    """{stat: {"for": per-game, "against": per-game allowed}} for EVERY stat stored on these team rows."""
+    if not rows:
+        return {}
+    out = {}
+    def put(k, f, a):
+        if f is not None or a is not None:
+            out[k] = {"for": None if f is None else round(f, 2), "against": None if a is None else round(a, 2)}
+    m = lambda key: statistics.fmean(r[key] for r in rows if key in r) if any(key in r for r in rows) else None
+    put("pts", m("pts"), m("opp_pts"))
+    for k in all_box_keys(rows):
+        put(k, m(k), m("opp_" + k))
+    for q in ("q1", "q2", "q3", "q4"):
+        put(q, m(q), m("o" + q))
+    put("h1", statistics.fmean(r["q1"] + r["q2"] for r in rows), statistics.fmean(r["oq1"] + r["oq2"] for r in rows))
+    put("h2", statistics.fmean(r["q3"] + r["q4"] + r["ot"] for r in rows), statistics.fmean(r["oq3"] + r["oq4"] + r["oot"] for r in rows))
+    off, dfn = four_factors(rows), four_factors(rows, "opp_")
+    for k in ("fg_pct", "fg3_pct", "ft_pct", "efg_pct", "tov_pct", "oreb_pct", "ft_rate", "fg3a_rate", "rating"):
+        put(k, off.get(k), dfn.get(k))
+    if off.get("pace") is not None and dfn.get("pace") is not None:
+        pc = (off["pace"] + dfn["pace"]) / 2
+        put("pace", pc, pc)
+    return out
+
+
+def league_z(tables):
+    """tables = {team: team_stat_table}. Adds for_z/for_rank/against_z/against_rank (rank 1 = most) in place."""
+    stats_ = {k for t in tables.values() for k in t}
+    for k in stats_:
+        for side in ("for", "against"):
+            vals = {tm: t[k][side] for tm, t in tables.items() if k in t and t[k][side] is not None}
+            if len(vals) < 8:
+                continue
+            mu, sd = statistics.fmean(vals.values()), statistics.pstdev(vals.values()) or 1.0
+            order = sorted(vals, key=vals.get, reverse=True)
+            for tm, v in vals.items():
+                tables[tm][k][side + "_z"] = round((v - mu) / sd, 2)
+                tables[tm][k][side + "_rank"] = order.index(tm) + 1
+    return tables
+
+
+def _norm_cdf(x):
+    import math
+    return 0.5 * (1 + math.erf(x / math.sqrt(2)))
+
+
+def _player_sd(vals, mean):
+    sd = statistics.pstdev(vals) if len(vals) > 2 else 0.0
+    return max(sd, 0.75 * (mean + 0.25) ** 0.5)       # count stats are never tighter than ~Poisson
+
+
+def matchup_adjust(market, opp_table, effects):
+    """(multiplier, [(stat, opp_rank, pct)]) for a player market against one opponent's 'allowed' table."""
+    parts = []
+    for stat in MATCHUP_METRICS.get(market, ()):
+        e = (effects.get(market) or {}).get(stat)
+        row = opp_table.get(stat) if opp_table else None
+        if not e or not row or row.get("against_z") is None or e["n"] < MATCHUP_MIN_N or e["slope"] <= 0:
+            continue
+        parts.append((stat, row.get("against_rank"), e["slope"] * row["against_z"]))
+    if not parts:
+        return 1.0, []
+    adj = MATCHUP_SHRINK * statistics.fmean(x[2] for x in parts)
+    adj = max(-MATCHUP_CAP, min(MATCHUP_CAP, adj))
+    return 1.0 + adj, [(st_, rk, round(100 * MATCHUP_SHRINK * v, 1)) for st_, rk, v in parts]
+
+
+def grade_pick(mean, sd, line, calib=1.0, n=10, min_l5=30.0, min_cv=0.1, lopsided=False, side=None, bias=0.0):
+    """Probability a pick hits and a letter grade. side None = whichever side the numbers favour."""
+    p_over = 1 - _norm_cdf((line - mean) / sd) if sd else 0.5
+    # measured correction: shrink toward a coin flip (calib) and remove the over-bias (bias, usually negative:
+    # count stats are right-skewed, so "over the mean" happens less than half the time)
+    p_over = min(0.99, max(0.01, 0.5 + calib * (p_over - 0.5) + bias))
+    side = side or ("over" if p_over >= 0.5 else "under")
+    p = p_over if side == "over" else 1 - p_over
+    idx = next(i for i, (_, lo) in enumerate(GRADE_BANDS) if p >= lo)
+    notes = []
+    if n < 8:
+        idx = max(idx, 2); notes.append(f"only {n} games - capped at B")
+    if min_cv > 0.25:
+        idx = min(idx + 1, len(GRADE_BANDS) - 1); notes.append("minutes unstable - one grade down")
+    if lopsided and min_l5 < 32:
+        idx = min(idx + 1, len(GRADE_BANDS) - 1); notes.append("blowout risk for a sub-32-minute player - one grade down")
+    return {"side": side, "p": round(p, 3), "p_over": round(p_over, 3), "grade": GRADE_BANDS[idx][0], "notes": notes}
+
+
+def fit_matchups(team_log, player_log):
+    """Walk-forward: for every player-game, compare the result to the player's own prior mean and to the opponent's
+    prior 'allowed' z-score for each tested stat. Returns the measured effect of every matchup signal, the player
+    projection error with and without matchup, and how over-confident the probabilities are (calibration)."""
+    trows = sorted((r for g in team_log.values() for r in g), key=lambda r: r["date"])
+    prows = sorted((r for g in player_log.values() for r in g), key=lambda r: r["date"])
+    thist, phist, ti = {}, {}, 0
+    sums = {}                                  # (market, stat) -> [Sw, Swz, Swy, Swzz, Swzy, n, weak(d,m), strong(d,m)]
+    err = {}                                   # market -> [abs base, abs adjusted, n]
+    cal = []                                   # (raw p_over, hit)
+    cur_date, tables = None, {}
+    def slope(a):
+        den = a[3] - a[1] * a[1] / a[0] if a[0] else 0
+        return (a[4] - a[1] * a[2] / a[0]) / den if den > 1e-9 else 0.0
+    for r in prows:
+        while ti < len(trows) and trows[ti]["date"] < r["date"]:
+            thist.setdefault(trows[ti]["team"], []).append(trows[ti]); ti += 1
+        if r["date"] != cur_date:
+            cur_date = r["date"]
+            ready = {tm: R for tm, R in thist.items() if len(R) >= 5}
+            tables = league_z({tm: team_stat_table(R) for tm, R in ready.items()}) if len(ready) >= 24 else {}
+        H = [h for h in phist.get(r["player_id"], []) if h["min"] >= MIN_MINUTES]
+        opp_t = tables.get(r["opp"])
+        if len(H) >= 5 and r["min"] >= MIN_MINUTES and opp_t:
+            for mk, stats_ in MATCHUP_METRICS.items():
+                fn = PLAYER_MARKETS[mk]
+                vals = [fn(h) for h in H if fn(h) is not None]
+                act = fn(r)
+                if len(vals) < 5 or act is None:
+                    continue
+                mean = statistics.fmean(vals)
+                if mean < (1.0 if mk in ("STL", "BLK", "3PM", "TOV", "OREB", "S+B", "FTM", "FTA", "3PA", "PF") else 3.0):
+                    continue
+                eff_now = {mk: {st_: {"slope": slope(sums[(mk, st_)]), "n": sums[(mk, st_)][5]}
+                                for st_ in stats_ if (mk, st_) in sums}}
+                mult, _ = matchup_adjust(mk, opp_t, eff_now)
+                e = err.setdefault(mk, [0.0, 0.0, 0])
+                e[0] += abs(mean - act); e[1] += abs(mean * mult - act); e[2] += 1
+                if mk in ("PTS", "REB", "AST", "PRA", "3PM"):
+                    line = half_round(statistics.median(vals[-20:]), statistics.fmean(vals[-20:]))
+                    if act != line:
+                        cal.append((1 - _norm_cdf((line - mean * mult) / _player_sd(vals, mean)), act > line))
+                y = act / mean - 1
+                for st_ in stats_:
+                    row = opp_t.get(st_)
+                    if not row or row.get("against_z") is None:
+                        continue
+                    z = row["against_z"]
+                    a = sums.setdefault((mk, st_), [0.0, 0.0, 0.0, 0.0, 0.0, 0, [0.0, 0.0], [0.0, 0.0]])
+                    w = mean
+                    a[0] += w; a[1] += w * z; a[2] += w * y; a[3] += w * z * z; a[4] += w * z * y; a[5] += 1
+                    if z >= 0.5:
+                        a[6][0] += act - mean; a[6][1] += mean
+                    elif z <= -0.5:
+                        a[7][0] += act - mean; a[7][1] += mean
+        phist.setdefault(r["player_id"], []).append(r)
+    effects = {}
+    for (mk, st_), a in sums.items():
+        effects.setdefault(mk, {})[st_] = {
+            "slope": round(slope(a), 4), "n": a[5],
+            "vs_weak_def_pct": round(100 * a[6][0] / a[6][1], 1) if a[6][1] else None,
+            "vs_strong_def_pct": round(100 * a[7][0] / a[7][1], 1) if a[7][1] else None,
+            "used": a[5] >= MATCHUP_MIN_N and slope(a) > 0}
+    # calibration: the single shrink factor c that minimises Brier score of p' = .5 + c (p - .5)
+    best_c, best_bias, best_b = 1.0, 0.0, None
+    for c in [x / 20 for x in range(0, 21)]:
+        for bias in [x / 100 for x in range(-10, 11)]:
+            b = statistics.fmean(((0.5 + c * (p - 0.5) + bias) - hit) ** 2 for p, hit in cal) if cal else 0
+            if best_b is None or b < best_b:
+                best_c, best_bias, best_b = c, bias, b
+    buckets = []
+    for lo, hi in ((0, .35), (.35, .45), (.45, .55), (.55, .65), (.65, 1.01)):
+        sel = [(p, h) for p, h in cal if lo <= p < hi]
+        if sel:
+            buckets.append({"model_said": f"{int(lo*100)}-{int(min(hi,1)*100)}%", "n": len(sel),
+                            "avg_model_p": round(100 * statistics.fmean(p for p, _ in sel), 1),
+                            "actual_over_pct": round(100 * statistics.fmean(h for _, h in sel), 1)})
+    return {"effects": effects, "calibration": {"c": best_c, "bias": best_bias, "n": len(cal), "buckets": buckets},
+            "player_mae": {mk: {"season_mean": round(e[0] / e[2], 3), "with_matchup": round(e[1] / e[2], 3), "n": e[2]}
+                           for mk, e in err.items() if e[2]}}
+
+
+def build_grades(players, teams, games, proj_games, fit, day):
+    """Today's slate: every player x market graded from his own numbers, his minutes and the opponent matchup;
+    plus, per game, every stat ranked strength-vs-weakness with the players it points to."""
+    tables = {t["team"]: t.get("stats") or {} for t in teams}
+    opp_of, home_of, lop = {}, {}, set()
+    wp = {g["home"]: g.get("home_win_prob") for g in (proj_games or []) if g.get("ok")}
+    for g in games:
+        opp_of[g["home"]], opp_of[g["away"]] = g["away"], g["home"]
+        home_of[g["home"]], home_of[g["away"]] = True, False
+        p = wp.get(g["home"])
+        if p is not None and (p >= 0.75 or p <= 0.25):
+            lop.update((g["home"], g["away"]))
+    c, bias = fit["calibration"]["c"], fit["calibration"].get("bias", 0.0)
+    out_players, by_team = [], {}
+    for pl in players:
+        tm = pl["team"]
+        if tm not in opp_of or pl["eligible_gp"] < 5 or (pl.get("min_l5") or 0) < MIN_MINUTES:
+            continue
+        rec = {"player": pl["player"], "team": tm, "opp": opp_of[tm], "home": home_of[tm], "min_l5": pl["min_l5"],
+               "min_cv": pl.get("min_cv", 0.1), "n": pl["eligible_gp"], "lopsided": tm in lop, "markets": {}}
+        for mk, b in pl["markets"].items():
+            if b.get("proj") is None or not b.get("proj_sd"):
+                continue
+            mult, fx = matchup_adjust(mk, tables.get(opp_of[tm]), fit["effects"])
+            adj, sd = b["proj"] * mult, max(b["proj_sd"], 0.75 * (b["proj"] + 0.25) ** 0.5)
+            g = grade_pick(adj, sd, b["line"], c, pl["eligible_gp"], pl["min_l5"], rec["min_cv"], tm in lop, bias=bias)
+            if b["line_source"] == "signal-median":
+                if b["line"] < 1.5:
+                    continue      # "under 0.5 blocks" for a guard is true and worthless: no book hangs that number
+                g["notes"].append("graded against SIGNAL's baseline, not a posted line - enter the book's number to grade the real bet")
+            rec["markets"][mk] = {"base": b["proj"], "adj": round(adj, 1), "sd": round(sd, 1), "line": b["line"],
+                                  "book": b["line_source"] != "signal-median", "src": b["line_source"],
+                                  "fx": [[STAT_LABELS.get(st_, st_), rk, pct] for st_, rk, pct in fx], **g}
+        out_players.append(rec)
+        by_team.setdefault(tm, []).append(rec)
+    out_games = []
+    for g in games:
+        gm = {"home": g["home"], "away": g["away"], "edges": {}}
+        for off, dfn in ((g["away"], g["home"]), (g["home"], g["away"])):
+            O, D = tables.get(off) or {}, tables.get(dfn) or {}
+            rows = []
+            for st_ in O:
+                if st_ not in D or O[st_].get("for_z") is None or D[st_].get("against_z") is None:
+                    continue
+                mk = STAT_TO_MARKET.get(st_)
+                e = ((fit["effects"].get(mk) or {}).get(st_) or {}) if mk else {}
+                who = []
+                if mk:
+                    cand = sorted((p for p in by_team.get(off, []) if mk in p["markets"]),
+                                  key=lambda p: -p["markets"][mk]["base"])[:3]
+                    who = [{"player": p["player"], "market": mk, **{k: p["markets"][mk][k] for k in ("base", "adj", "line", "book", "side", "p", "grade")}}
+                           for p in cand]
+                rows.append({"stat": st_, "label": STAT_LABELS.get(st_, st_.replace("x_", "").replace("_", " ")),
+                             "off": O[st_]["for"], "off_rank": O[st_].get("for_rank"), "def": D[st_]["against"],
+                             "def_rank": D[st_].get("against_rank"), "score": round(O[st_]["for_z"] + D[st_]["against_z"], 2),
+                             "market": mk, "proven": bool(e.get("used")), "tested_n": e.get("n"),
+                             "vs_weak_def_pct": e.get("vs_weak_def_pct"), "players": who})
+            rows.sort(key=lambda x: -x["score"])
+            gm["edges"][off] = rows
+        out_games.append(gm)
+    return {"generated": STAMP, "date": day.isoformat(), "calibration_c": c, "calibration_bias": bias,
+            "bands": [list(b) for b in GRADE_BANDS],
+            "players": out_players, "games": out_games}
 
 
 # ---------------------------------------------------------------- report
@@ -1051,6 +1392,12 @@ def main():
     print("accuracy:", acc["games_scored"], "games scored; model MAE", acc["mae"]["signal_model"],
           "| old own-median", acc["mae"]["own_median"], "| book", acc["mae"]["book_close"])
     players, teams = compute(team_log, player_log)
+    fit = fit_matchups(team_log, player_log)
+    acc["matchup_effects"], acc["calibration"], acc["player_mae"] = fit["effects"], fit["calibration"], fit["player_mae"]
+    save(os.path.join(DATA, "accuracy.json"), acc)
+    if games:
+        pj = load(os.path.join(DATA, "projections.json"), {}).get("games")
+        save(os.path.join(DATA, "grades.json"), build_grades(players, teams, games, pj, fit, today))
     days = load(os.path.join(DATA, "ingested_days.json"), [])
     save(RATES_JSON, {"generated": STAMP, "through": days[-1] if days else None,
                       "min_minutes": MIN_MINUTES, "players": players})
