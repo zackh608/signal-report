@@ -1341,6 +1341,18 @@ def build_grades(players, teams, games, proj_games, fit, day, injuries=None, con
         lst.sort(key=lambda p: -p["min_season"])
         top3[tm] = lst[:3]
         out_top[tm] = [p["player"] for p in top3[tm] if (st_of(p) or {}).get("kind") == "out"]
+    # 2026-11-12 lesson (Coby White): the injury report says who is OUT, not who is coming BACK. A rotation player
+    # who missed his team's last two games and is no longer listed is a likely returner: he takes the usage the
+    # "teammate out" boost was handing to everyone else.
+    team_last = {t["team"]: t.get("last_game") for t in teams}
+    team_dates = {t["team"]: sorted({g_["date"] for g_ in t.get("game_log", [])}) for t in teams}
+    returning = {}
+    for pl in players:
+        tm = pl["team"]
+        if tm in opp_of and pl["eligible_gp"] >= 3 and pl.get("min_season", 0) >= 20 and not st_of(pl):
+            missed = [d for d in team_dates.get(tm, []) if d > pl["last_game"]]
+            if len(missed) >= 2:
+                returning.setdefault(tm, []).append({"player": pl["player"], "missed": len(missed), "min_season": pl["min_season"]})
     sat_out = []
     out_players, by_team = [], {}
     for pl in players:
@@ -1353,7 +1365,8 @@ def build_grades(players, teams, games, proj_games, fit, day, injuries=None, con
                             "min_season": pl["min_season"]})
             continue
         wp = fav.get(tm)
-        flags = {"teammate_out": any(n_ != pl["player"] for n_ in out_top.get(tm, [])),
+        flags = {"teammate_out": any(n_ != pl["player"] for n_ in out_top.get(tm, []))
+                                 and not any(r_["player"] != pl["player"] for r_ in returning.get(tm, [])),
                  "new_starter": pl["role"]["new_starter"], "to_bench": pl["role"]["to_bench"],
                  "big_fav": wp is not None and wp >= BIG_FAV and pl["min_season"] >= 24,
                  "big_dog": wp is not None and wp <= 1 - BIG_FAV and pl["min_season"] >= 24,
@@ -1365,6 +1378,7 @@ def build_grades(players, teams, games, proj_games, fit, day, injuries=None, con
                "status": status and {"status": status["status"], "kind": status["kind"], "detail": status["detail"]},
                "flags": [k for k, v in flags.items() if v],
                "out_teammates": [n_ for n_ in out_top.get(tm, []) if n_ != pl["player"]],
+               "returning_teammates": [r_["player"] for r_ in returning.get(tm, []) if r_["player"] != pl["player"]],
                "splits": [sp for sp in pl.get("splits", []) if sp["teammate"] in out_top.get(tm, [])] or pl.get("splits", [])[:2],
                "blowout": pl.get("blowout"),
                "pos_def": (next((t.get("allowed_by_position", {}).get(pg_) for t in teams if t["team"] == opp_of[tm]), None)
@@ -1420,6 +1434,7 @@ def build_grades(players, teams, games, proj_games, fit, day, injuries=None, con
         out_games.append(gm)
     return {"generated": STAMP, "date": day.isoformat(), "calibration_c": c, "calibration_bias": bias,
             "bands": [list(b) for b in GRADE_BANDS], "out": sat_out, "injuries_known": injuries is not None,
+            "possible_returns": [{"team": tm, **r_} for tm, L in returning.items() for r_ in L],
             "players": out_players, "games": out_games}
 
 

@@ -276,6 +276,8 @@ function cardContext(g,P){
     if(c.road_trip>=2) t.push('game '+(c.road_trip+1)+' of a road trip'); if(Math.abs(c.tz_shift)>=2) t.push(Math.abs(c.tz_shift)+' time zones '+(c.tz_shift>0?'east':'west')); if(c.rest>=3) t.push(c.rest-1+' days off');
     return t.length? '<b>'+ab+':</b> '+t.join(', ') : ''; };
   var inj=[out(g.away.abbr),out(g.home.abbr)].filter(Boolean).join(' · ');
+  var back=(GR.possible_returns||[]).filter(x=>x.team===g.away.abbr||x.team===g.home.abbr);
+  if(back.length) inj+=(inj?'<br>':'')+'<b class="under">Possible returns (off the injury report after missing games):</b> '+back.map(x=>x.player+' <span class="neutral">('+x.team+', '+x.min_season+' min, missed '+x.missed+')</span>').join(', ')+' <span class="neutral">— teammate-out boosts are switched off for these teams</span>';
   var rest=P?[sch(g.away.abbr,P.away_sched),sch(g.home.abbr,P.home_sched)].filter(Boolean).join(' · '):'';
   var mv=''; if(P&&P.open&&P.book){ var a=[]; if(P.open.total!=null&&P.book.total!=null&&P.open.total!==P.book.total) a.push('total '+P.open.total+' → <b>'+P.book.total+'</b>');
     if(P.open.home_spread!=null&&P.book.home_spread!=null&&P.open.home_spread!==P.book.home_spread) a.push('spread '+P.open.home_spread+' → <b>'+P.book.home_spread+'</b>'); mv=a.length?'<b>Line moved:</b> '+a.join(', '):''; }
