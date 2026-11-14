@@ -5,7 +5,10 @@ There is no AI in the loop and no paid data source.
 
 ## 1. Normal operation (hands-off)
 
-The workflow `.github/workflows/signal.yml` runs every day at 13:00 UTC (8 AM ET):
+The workflow `.github/workflows/signal.yml` runs twice a day, ~5:17 AM and ~2:43 PM ET (odd minutes, because GitHub
+delays jobs scheduled on the hour), never two at once. GitHub is the one place the tracker runs. The PC only mirrors
+the results with `sync_from_github.py` (Desktop\SIGNAL NBA Tracker; scheduled by "SETUP AUTO (run once).bat" at
+6:30 AM, 3:30 PM, at logon and on wake after a missed time; "SYNC NOW.bat" to do it by hand). Each run:
 
 1. `build_signal.py` → team report to the gist (existing behaviour).
 2. `nba_tracker.py` → pulls any date from the season opener through yesterday that is not yet in
