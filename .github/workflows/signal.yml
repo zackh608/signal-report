@@ -2,7 +2,9 @@ name: SIGNAL daily report
 
 on:
   schedule:
-    - cron: "0 13 * * *"
+    # GitHub delays jobs scheduled on the hour by hours; odd minutes run close to on time.
+    - cron: "17 10 * * *"   # ~5:17 AM ET: last night's games are final -> morning tally + today's slate
+    - cron: "43 19 * * *"   # ~2:43 PM ET: refresh injury report and posted lines before tip-off
   workflow_dispatch:
     inputs:
       nba_from:
@@ -12,6 +14,10 @@ on:
 
 permissions:
   contents: write
+
+concurrency:
+  group: signal-daily
+  cancel-in-progress: false
 
 jobs:
   build:
@@ -41,11 +47,14 @@ jobs:
             python nba_tracker.py --backfill-lines
           fi
 
+      - name: Rebuild context summaries (context/ - read by Claude project sessions)
+        run: python tools/build_context.py
+
       - name: Commit NBA data back to repo (keeps backfill state)
         run: |
           git config user.name "signal-bot"
           git config user.email "signal-bot@users.noreply.github.com"
-          git add data/nba nba_player_props.md data/nba/lines
+          git add data/nba nba_player_props.md data/nba/lines context
           git diff --cached --quiet && echo "no data changes" && exit 0
           git commit -m "nba: data through $(date -u +%F)"
           # the Desktop scheduled task may have pushed the same day's data; replay on top, keep our files
