@@ -1,2 +1,2 @@
-projections.json: slate date 2026-11-14, generated 2026-11-14T23:23:14+00:00
-grades.json: slate date 2026-11-14, generated 2026-11-14T23:23:14+00:00
+projections.json: slate date 2026-11-15, generated 2026-11-15T17:12:34+00:00
+grades.json: slate date 2026-11-15, generated 2026-11-15T17:12:34+00:00
