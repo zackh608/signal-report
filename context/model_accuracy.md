@@ -1,21 +1,21 @@
-# SIGNAL model accuracy (data through 2026-11-15, 149 games scored walk-forward)
+# SIGNAL model accuracy (data through 2026-11-16, 152 games scored walk-forward)
 
 | Method | Total miss | Margin miss | Team pts miss | Winner % |
 |---|---|---|---|---|
-| SIGNAL model | 14.38 | 12.0 | 9.59 | 69.8 |
-| Book closing line | 14.04 | 11.06 | 9.21 | 74.5 |
-| League average | 14.9 | 13.74 | 10.24 | - |
-| Old own-median line | 15.91 | 13.55 | 10.59 | - |
+| SIGNAL model | 14.33 | 11.96 | 9.58 | 69.7 |
+| Book closing line | 13.98 | 11.06 | 9.18 | 74.3 |
+| League average | 14.93 | 13.72 | 10.22 | - |
+| Old own-median line | 15.83 | 13.5 | 10.57 | - |
 
-SIGNAL vs the book when they disagree by 3+: totals 35-35, spreads 38-43.
+SIGNAL vs the book when they disagree by 3+: totals 37-36, spreads 39-43.
 
 ## Situations that move player output (% vs own average)
-- **b2b**: scoring +4.9% (n=276), rebounding +2.5% (n=217), assists -4.2% (n=117), minutes +4.0% (n=276)
-- **three_in_four**: scoring +0.3% (n=430), rebounding +1.5% (n=351), assists -3.0% (n=182), minutes +2.0% (n=430)
-- **big_dog**: scoring +0.3% (n=122), rebounding -0.4% (n=106), minutes +2.1% (n=122), assists -5.4% (n=55)
-- **teammate_out**: scoring +13.7% (n=337), rebounding +10.0% (n=256), assists +11.9% (n=111), minutes +9.8% (n=337)
-- **new_starter**: scoring +18.8% (n=72), rebounding +32.0% (n=48), minutes +16.2% (n=72)
-- **big_fav**: scoring +2.6% (n=137), rebounding +5.2% (n=125), assists -3.9% (n=85), minutes +1.0% (n=137)
+- **b2b**: scoring +4.7% (n=290), rebounding +2.3% (n=229), assists -5.0% (n=123), minutes +4.0% (n=290)
+- **three_in_four**: scoring +1.4% (n=452), rebounding +1.6% (n=366), assists -0.6% (n=191), minutes +2.3% (n=452)
+- **big_dog**: scoring +0.7% (n=138), rebounding -1.7% (n=120), minutes +2.0% (n=138), assists -4.2% (n=60)
+- **teammate_out**: scoring +14.2% (n=359), rebounding +9.6% (n=271), assists +14.5% (n=120), minutes +9.7% (n=359)
+- **new_starter**: scoring +16.9% (n=78), rebounding +30.3% (n=53), minutes +16.1% (n=78)
+- **big_fav**: scoring +3.6% (n=148), rebounding +6.1% (n=135), assists -3.1% (n=93), minutes +1.3% (n=148)
 
 ## Matchup signals that tested real
 - PTS: pts, pace, pitp, fta
