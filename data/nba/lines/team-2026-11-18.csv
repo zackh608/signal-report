@@ -1,17 +1,25 @@
 home,segment,line,book
-CLE,FULL,236.5,Draft Kings
-CLE,SPREAD,-5.5,Draft Kings
-IND,FULL,224.5,Draft Kings
-IND,SPREAD,7.5,Draft Kings
-MIA,FULL,236.5,Draft Kings
-MIA,SPREAD,-12.5,Draft Kings
-ORL,FULL,223.5,Draft Kings
-ORL,SPREAD,1.5,Draft Kings
-BKN,FULL,237.5,Draft Kings
-BKN,SPREAD,-2.5,Draft Kings
-OKC,FULL,226.5,Draft Kings
-OKC,SPREAD,-7.5,Draft Kings
-DEN,FULL,219.5,Draft Kings
-DEN,SPREAD,2.5,Draft Kings
-SAC,FULL,229.5,Draft Kings
-SAC,SPREAD,6.5,Draft Kings
+CLE,FULL,237.5,DraftKings
+CLE,SPREAD,-4.5,DraftKings
+IND,FULL,225.5,DraftKings
+IND,SPREAD,7.5,DraftKings
+MIA,FULL,236.5,DraftKings
+MIA,SPREAD,-11.5,DraftKings
+ORL,FULL,222.5,DraftKings
+ORL,SPREAD,1.5,DraftKings
+BKN,FULL,239.5,DraftKings
+BKN,SPREAD,-2.5,DraftKings
+TOR,FULL,225.5,DraftKings
+TOR,SPREAD,-4.5,DraftKings
+NO,FULL,228.5,DraftKings
+NO,SPREAD,6.5,DraftKings
+OKC,FULL,228.5,DraftKings
+OKC,SPREAD,-6.5,DraftKings
+DAL,FULL,225.5,DraftKings
+DAL,SPREAD,-4.5,DraftKings
+DEN,FULL,219.5,DraftKings
+DEN,SPREAD,2.5,DraftKings
+LAL,FULL,228.5,DraftKings
+LAL,SPREAD,-10.5,DraftKings
+SAC,FULL,226.5,DraftKings
+SAC,SPREAD,6.5,DraftKings
