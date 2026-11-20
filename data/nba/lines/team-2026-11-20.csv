@@ -1,11 +1,19 @@
 home,segment,line,book
-ATL,FULL,218.5,Draft Kings
-ATL,SPREAD,-5.5,Draft Kings
-BKN,FULL,222.5,Draft Kings
-BKN,SPREAD,5.5,Draft Kings
-CLE,FULL,234.5,Draft Kings
-CLE,SPREAD,-7.5,Draft Kings
-DET,FULL,215.5,Draft Kings
-DET,SPREAD,-8.5,Draft Kings
-CHI,FULL,240.5,Draft Kings
-CHI,SPREAD,-2.5,Draft Kings
+ATL,FULL,218.5,DraftKings
+ATL,SPREAD,-6.5,DraftKings
+BKN,FULL,224.5,DraftKings
+BKN,SPREAD,6.5,DraftKings
+CLE,FULL,233.5,DraftKings
+CLE,SPREAD,-5.5,DraftKings
+DET,FULL,216.5,DraftKings
+DET,SPREAD,-6.5,DraftKings
+CHI,FULL,237.5,DraftKings
+CHI,SPREAD,-2.5,DraftKings
+OKC,FULL,228.5,DraftKings
+OKC,SPREAD,-11.5,DraftKings
+UTAH,FULL,225.5,DraftKings
+UTAH,SPREAD,4.5,DraftKings
+DEN,FULL,226.5,DraftKings
+DEN,SPREAD,-1.5,DraftKings
+LAL,FULL,228.5,DraftKings
+LAL,SPREAD,-14.5,DraftKings
