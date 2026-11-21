@@ -1,13 +1,11 @@
 home,segment,line,book
-PHI,FULL,229.5,Draft Kings
-PHI,SPREAD,-11.5,Draft Kings
-NY,FULL,215.5,Draft Kings
-NY,SPREAD,-3.5,Draft Kings
-DAL,FULL,230.5,Draft Kings
-DAL,SPREAD,-5.5,Draft Kings
-MIN,FULL,228.5,Draft Kings
-MIN,SPREAD,-6.5,Draft Kings
-SA,FULL,228.5,Draft Kings
-SA,SPREAD,-18.5,Draft Kings
-SAC,FULL,217.5,Draft Kings
-SAC,SPREAD,13.5,Draft Kings
+NY,FULL,213.5,DraftKings
+NY,SPREAD,1.5,DraftKings
+DAL,FULL,230.5,DraftKings
+DAL,SPREAD,-4.5,DraftKings
+MIN,FULL,228.5,DraftKings
+MIN,SPREAD,-5.5,DraftKings
+SA,FULL,229.5,DraftKings
+SA,SPREAD,-18.5,DraftKings
+SAC,FULL,215.5,DraftKings
+SAC,SPREAD,12.5,DraftKings
