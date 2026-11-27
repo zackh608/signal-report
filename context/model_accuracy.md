@@ -10,13 +10,13 @@
 SIGNAL vs the book when they disagree by 3+: totals 41-52, spreads 50-50.
 
 ## Situations that move player output (% vs own average)
-- **b2b**: scoring +5.2% (n=355), rebounding +3.1% (n=277), assists -3.0% (n=144), minutes +4.1% (n=355)
-- **three_in_four**: scoring +1.2% (n=563), rebounding +3.6% (n=453), assists -0.2% (n=228), minutes +2.5% (n=563)
-- **to_bench**: scoring -1.7% (n=49), minutes -4.1% (n=49)
-- **big_dog**: scoring +2.7% (n=207), rebounding +0.7% (n=183), minutes +2.3% (n=207), assists -3.8% (n=87)
-- **teammate_out**: scoring +11.2% (n=690), rebounding +6.8% (n=525), assists +12.9% (n=235), minutes +8.7% (n=690)
-- **new_starter**: scoring +10.7% (n=116), rebounding +18.4% (n=83), minutes +12.8% (n=116)
-- **big_fav**: scoring +5.9% (n=220), rebounding +5.6% (n=199), assists +1.8% (n=132), minutes +1.7% (n=220)
+- **b2b**: scoring +5.3% (n=355), rebounding +3.2% (n=277), assists -2.9% (n=144), minutes +4.2% (n=355)
+- **three_in_four**: scoring +1.3% (n=563), rebounding +3.8% (n=453), assists -0.1% (n=228), minutes +2.6% (n=563)
+- **to_bench**: scoring -1.6% (n=49), minutes -4.0% (n=49)
+- **big_dog**: scoring +2.7% (n=207), rebounding +0.9% (n=183), minutes +2.4% (n=207), assists -3.7% (n=87)
+- **teammate_out**: scoring +11.3% (n=697), rebounding +7.1% (n=530), assists +13.0% (n=237), minutes +8.8% (n=697)
+- **new_starter**: scoring +10.8% (n=116), rebounding +18.5% (n=83), minutes +12.8% (n=116)
+- **big_fav**: scoring +6.0% (n=220), rebounding +5.7% (n=199), assists +1.8% (n=132), minutes +1.8% (n=220)
 
 ## Matchup signals that tested real
 - PTS: pts, pace, pitp, fta
