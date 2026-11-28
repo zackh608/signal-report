@@ -1,9 +1,11 @@
 home,segment,line,book
 WSH,FULL,218.5,DraftKings
 WSH,SPREAD,3.5,DraftKings
-CHA,FULL,213.5,DraftKings
-CHA,SPREAD,-5.5,DraftKings
-CHI,FULL,236.5,DraftKings
+CHA,FULL,212.5,DraftKings
+CHA,SPREAD,-6.5,DraftKings
+CHI,FULL,233.5,DraftKings
 CHI,SPREAD,-2.5,DraftKings
 MIL,FULL,228.5,DraftKings
 MIL,SPREAD,12.5,DraftKings
+HOU,FULL,219.5,DraftKings
+HOU,SPREAD,-12.5,DraftKings
