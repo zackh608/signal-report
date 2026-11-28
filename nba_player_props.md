@@ -1,6 +1,6 @@
 # SIGNAL NBA Tracker
 
-Generated: `2026-11-27T19:28:57+00:00` | games through `2026-11-25` | 30 teams | 342 players with 3+ eligible games
+Generated: `2026-11-28T02:09:53+00:00` | games through `2026-11-25` | 30 teams | 342 players with 3+ eligible games
 
 Hit rates use games with 15+ minutes. Line source `signal-median` = median of the last 20 eligible games (the player's season baseline; no posted line captured); book lines come from data/nba/lines/*.csv.
 
